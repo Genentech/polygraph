@@ -2,5 +2,4 @@
 
 This package evaluates and compares groups of nucleic acid sequences based on their sequence and functional content for effective design of regulatory elements. 
 
-
-![polygraph_schematic](https://github.com/Genentech/polygraph/assets/11052222/5061f4f3-b68a-4974-9ba4-f92335c887d1)
+![polygraph_schematic](https://github.com/Genentech/polygraph/assets/11052222/59897763-e064-436f-85bc-c205d9cb4b4a)
