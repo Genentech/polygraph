@@ -129,7 +129,7 @@ def nmf(counts, seqs, reference_group, group_col='Group', n_components=10):
     return W, H, res
 
 
-def motif_combinations(counts, seqs, reference_group, group_col='Group', min_group_freq=10):
+def motif_combinations(counts, seqs, reference_group, group_col='Group', min_group_freq=10, min_group_prop=None):
     """
     Count occurences of pairwise combinations of motifs and compare between groups
     """
@@ -150,10 +150,20 @@ def motif_combinations(counts, seqs, reference_group, group_col='Group', min_gro
     
     print("Filtering")
     # Drop rare combinations 
-    comb_max = cts.groupby('combination')['count'].max()
-    sel_comb = cts.combination[cts.combination.isin(comb_max[comb_max > min_group_freq].index)].tolist()
-    motif_combinations = motif_combinations[motif_combinations.combination.isin(sel_comb)]
-    cts = cts[cts.combination.isin(sel_comb)]
+    if min_group_freq is not None:
+        comb_max = cts.groupby('combination')['count'].max()
+        sel_comb = cts.combination[cts.combination.isin(comb_max[comb_max > min_group_freq].index)].tolist()
+        print(f"Selected {len(sel_comb)} combinations")
+        motif_combinations = motif_combinations[motif_combinations.combination.isin(sel_comb)]
+        cts = cts[cts.combination.isin(sel_comb)]
+    elif min_group_prop is not None:
+        cts['group_total'] = seqs.Group.value_counts()[cts.Group].tolist()
+        cts['group_prop'] = cts['count']/cts.group_total
+        #print(cts)
+        sel_comb = set(cts.combination[cts.group_prop > min_group_prop])
+        print(f"Selected {len(sel_comb)} combinations")
+        motif_combinations = motif_combinations[motif_combinations.combination.isin(sel_comb)]
+        cts = cts[cts.combination.isin(sel_comb)]
 
     print("Significance testing")
     # Significance testing
