@@ -1,7 +1,6 @@
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../sequence-evaluation'))
-from sequence import gc, kmer_frequencies, unique_kmers, kmer_positions
+import numpy as np
+
+from polygraph.sequence import gc, kmer_frequencies, kmer_positions, unique_kmers
 
 
 def test_gc():
