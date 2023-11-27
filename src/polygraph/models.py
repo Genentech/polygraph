@@ -1,13 +1,11 @@
 import numpy as np
 import pandas as pd
 import torch
-from transformers import AutoTokenizer, AutoModelForMaskedLM, EsmForMaskedLM
 from enformer_pytorch import Enformer, str_to_one_hot
 from torch import nn
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from utils import pad_with_Ns
+from transformers import AutoModelForMaskedLM, AutoTokenizer, EsmForMaskedLM
+
+from polygraph.utils import pad_with_Ns
 
 
 def batch(sequences, batch_size):
@@ -35,8 +33,9 @@ def load_enformer():
     Load pre-trained enformer model
     """
     return Enformer.from_pretrained(
-            "EleutherAI/enformer-official-rough", target_length=-1
-        )
+        "EleutherAI/enformer-official-rough", target_length=-1
+    )
+
 
 def enformer_embed(sequences, model):
     """
@@ -52,7 +51,9 @@ def enformer_embed(sequences, model):
     return model(sequences, return_only_embeddings=True).mean(1).cpu().detach().numpy()
 
 
-def load_nucleotide_transformer(model="InstaDeepAI/nucleotide-transformer-2.5b-multi-species"):
+def load_nucleotide_transformer(
+    model="InstaDeepAI/nucleotide-transformer-2.5b-multi-species",
+):
     """
     Load pre-trained nucleotide transformer model
 
@@ -60,9 +61,9 @@ def load_nucleotide_transformer(model="InstaDeepAI/nucleotide-transformer-2.5b-m
         model (str): Name of pretrained model to download
     """
     tokenizer = AutoTokenizer.from_pretrained(model)
-    model = AutoModelForMaskedLM.from_pretrained(model) 
+    model = AutoModelForMaskedLM.from_pretrained(model)
     return model, tokenizer
-    
+
 
 def nucleotide_transformer_embed(sequences, model, tokenizer):
     """
@@ -75,14 +76,16 @@ def nucleotide_transformer_embed(sequences, model, tokenizer):
     Returns:
         np.array of shape (n_seqs x )
     """
-    tokens = tokenizer.batch_encode_plus(sequences, return_tensors="pt", padding=True)["input_ids"]
+    tokens = tokenizer.batch_encode_plus(sequences, return_tensors="pt", padding=True)[
+        "input_ids"
+    ]
     torch_outs = model(
         tokens,
-        attention_mask=tokens_ids != tokenizer.pad_token_id,
-        encoder_attention_mask=tokens_ids != tokenizer.pad_token_id,
-        output_hidden_states=True
+        attention_mask=tokens != tokenizer.pad_token_id,
+        encoder_attention_mask=tokens != tokenizer.pad_token_id,
+        output_hidden_states=True,
     )
-    return torch_outs['hidden_states'][-1].mean(1).cpu().detach().numpy()
+    return torch_outs["hidden_states"][-1].mean(1).cpu().detach().numpy()
 
 
 def sequential_embed(sequences, model, drop_last_layers, swapaxes=False):
@@ -97,10 +100,10 @@ def sequential_embed(sequences, model, drop_last_layers, swapaxes=False):
     Returns:
         np.array of shape (n_seqs x n_features)
     """
-    x = str_to_one_hot(sequences).swapaxes(1,2)
+    x = str_to_one_hot(sequences).swapaxes(1, 2)
     x = model[:-drop_last_layers](x)
     if swapaxes:
-        x = x.swapaxes(1,2)
+        x = x.swapaxes(1, 2)
     return x.mean(-1).cpu().squeeze().detach().numpy()
 
 
@@ -122,14 +125,19 @@ def _get_embeddings(model, sequences, drop_last_layers=1):
     elif isinstance(model, nn.Sequential):
         return sequential_embed(sequences, model, drop_last_layers)
     else:
-        raise TypeError("Embeddings cannot be automatically returned for this model type.")
+        raise TypeError(
+            "Embeddings cannot be automatically returned for this model type."
+        )
 
 
 def get_embeddings(seq_df, model, batch_size, drop_last_layers=1):
     """
     Get model embeddings for all sequences in a dataframe
     """
-    embeddings = [_get_embeddings(model, x, drop_last_layers) for x in batch(seq_df.Sequence.tolist(), batch_size)]
+    embeddings = [
+        _get_embeddings(model, x, drop_last_layers)
+        for x in batch(seq_df.Sequence.tolist(), batch_size)
+    ]
     return pd.DataFrame(np.vstack(embeddings), index=seq_df.index)
 
 
@@ -144,13 +152,13 @@ def cell_type_specificity(on_target, off_target):
     on_target = np.tile(on_target, (off_target.shape[0], 1))
 
     # Get the log2 fold change between on-target values and each off-target cell type
-    lfc = np.log2(on_target/off_target)
+    lfc = np.log2(on_target / off_target)
 
     # Calculate gap statistics
     mingap = lfc.min(0)
     maxgap = lfc.max(0)
     meangap = lfc.mean(0)
-    return pd.DataFrame({'mingap':mingap, 'maxgap':maxgap, 'meangap':meangap})
+    return pd.DataFrame({"mingap": mingap, "maxgap": maxgap, "meangap": meangap})
 
 
 def predict(model, seq_df, batch_size, device="cpu"):
@@ -161,12 +169,11 @@ def predict(model, seq_df, batch_size, device="cpu"):
 
     # Move model to device
     model = model.to(torch.device(device))
-    
+
     # Batch the sequences
     for x in batch(seq_df.Sequence.tolist(), batch_size):
-        
         # One-hot encode the sequence
-        x = str_to_one_hot(x).swapaxes(1,2)
+        x = str_to_one_hot(x).swapaxes(1, 2)
 
         # Move to device
         x = x.to(torch.device(device))

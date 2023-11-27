@@ -1,6 +1,4 @@
 import numpy as np
-import torch
-
 
 RC_HASH = {
     "A": "T",
@@ -91,7 +89,7 @@ def resize(seqs, seq_len):
         else:
             return pad_with_Ns(seqs, seq_len, end="both")
     else:
-        return [resize_strings(seq, seq_len=seq_len) for seq in seqs]
+        return [resize(seq, seq_len=seq_len) for seq in seqs]
 
 
 def rc(seqs):
@@ -109,4 +107,3 @@ def rc(seqs):
         return "".join([RC_HASH[base] for base in reversed(seqs)])
     else:
         return ["".join([RC_HASH[base] for base in reversed(seq)]) for seq in seqs]
-

@@ -1,13 +1,14 @@
-import numpy as np
+import json
 import os
 import sys
-import json
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
-def load_hyenadna(hyena_path, ckpt_dir='.', model='hyenadna-small-32k-seqlen'):
+def load_hyenadna(hyena_path, ckpt_dir=".", model="hyenadna-small-32k-seqlen"):
     """
     Loads the pretrained hyenaDNA foundation model.
 
@@ -16,17 +17,17 @@ def load_hyenadna(hyena_path, ckpt_dir='.', model='hyenadna-small-32k-seqlen'):
         the recurse-submodules flag. See installation instructions at
         https://github.com/HazyResearch/hyena-dna/tree/main.
         ckpt_dir (str): Path to directory in which to download the model
-        model (str): Name of the foundation model to download. See 
+        model (str): Name of the foundation model to download. See
         https://github.com/HazyResearch/hyena-dna/tree/main for options.
 
     Returns:
         model (ConvLMHeadModel): Pretrained HyenaDNA model
-    
+
     """
     # import hyenaDNA function
     sys.path.append(hyena_path)
     from src.models.sequence.long_conv_lm import ConvLMHeadModel
-    
+
     # Make directory if needed
     if not os.path.exists(ckpt_dir):
         print("Making checkpoint directory")
@@ -35,12 +36,18 @@ def load_hyenadna(hyena_path, ckpt_dir='.', model='hyenadna-small-32k-seqlen'):
     # Download model if not already downloaded
     if not os.path.exists(os.path.join(ckpt_dir, "config.json")):
         print("Downloading model")
-        os.system(f'wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/config.json')
-        os.system(f'wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/weights.ckpt')
+        config_url = (
+            f"https://huggingface.co/LongSafari/{model}/resolve/main/config.json"
+        )
+        ckpt_url = (
+            f"https://huggingface.co/LongSafari/{model}/resolve/main/weights.ckpt"
+        )
+        os.system(f"wget -P {ckpt_dir} {config_url}")
+        os.system(f"wget -P {ckpt_dir} {ckpt_url}")
 
     # Load config
     print("Loading config")
-    config = json.load(open(os.path.join(ckpt_dir, 'config.json'), 'r'))
+    config = json.load(open(os.path.join(ckpt_dir, "config.json"), "r"))
 
     # Generate model
     print("Building model")
@@ -48,7 +55,9 @@ def load_hyenadna(hyena_path, ckpt_dir='.', model='hyenadna-small-32k-seqlen'):
 
     # Load weights
     print("Loading weights")
-    state_dict = torch.load(os.path.join(ckpt_dir, 'weights.ckpt'), map_location=torch.device("cpu"))
+    state_dict = torch.load(
+        os.path.join(ckpt_dir, "weights.ckpt"), map_location=torch.device("cpu")
+    )
     torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
         state_dict["state_dict"], "model."
     )
@@ -56,7 +65,7 @@ def load_hyenadna(hyena_path, ckpt_dir='.', model='hyenadna-small-32k-seqlen'):
     for key in list(model_state_dict.keys()):
         if "torchmetrics" in key:
             model_state_dict.pop(key)
-    
+
     model.load_state_dict(model_state_dict)
     return model
 
@@ -67,17 +76,17 @@ class CharDataset(Dataset):
         A dataset class to produce sequences for hyenaDNA.
 
         Args:
-            seqs (list): List of sequences.            
+            seqs (list): List of sequences.
         """
         self.seqs = seqs
 
         self.stoi = {
-             "A": 7,
-             "C": 8,
-             "G": 9,
-             "T": 10,
-             "N": 11,
-         }
+            "A": 7,
+            "C": 8,
+            "G": 9,
+            "T": 10,
+            "N": 11,
+        }
 
     def __len__(self):
         return len(self.seqs)
@@ -115,6 +124,11 @@ def compute_likelihood(df, model, batch_size=32, num_workers=1, device="cpu"):
         probs = F.softmax(logits, dim=2).cpu().detach()
         truth = batch[:, 1:]
         probs = probs[:, :-1, :]
-        LL.extend([np.sum([pr[pos, tru[pos]].log().item() for pos in range(pr.shape[0])]) for pr, tru in zip(probs, truth)])
+        LL.extend(
+            [
+                np.sum([pr[pos, tru[pos]].log().item() for pos in range(pr.shape[0])])
+                for pr, tru in zip(probs, truth)
+            ]
+        )
 
     return LL

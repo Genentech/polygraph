@@ -1,17 +1,14 @@
 import itertools
+
+import editdistance
 import numpy as np
 import pandas as pd
-import scanpy as sc
-import editdistance
 from nltk.translate.bleu_score import corpus_bleu
-from sklearn.metrics import pairwise_distances
-import multiprocessing as mp
-
 
 STANDARD_BASES = ["A", "C", "G", "T"]
 
 
-def gc(seqs, sequence_col='Sequence'):
+def gc(seqs, sequence_col="Sequence"):
     """
     Calculate the GC fraction of a DNA sequence or list of sequences.
 
@@ -28,7 +25,7 @@ def gc(seqs, sequence_col='Sequence'):
     elif (isinstance(seqs, list)) or (isinstance(seqs, pd.Series)):
         return [gc(seq) for seq in list(seqs)]
 
-    elif (isinstance(seqs, pd.DataFrame)):
+    elif isinstance(seqs, pd.DataFrame):
         return [gc(seq) for seq in list(seqs[sequence_col])]
 
 
@@ -39,7 +36,8 @@ def kmer_frequencies(seqs, k, normalize=False, genome="hg38"):
     Args:
         seqs (pd.DataFrame): DNA sequences, as intervals, strings, or tensors.
         k (int): The length of the k-mer.
-        normalize (bool, optional): Whether to normalize the histogram so that the values sum to 1.
+        normalize (bool, optional): Whether to normalize the histogram so that
+            the values sum to 1.
         Default is False.
 
     Returns:
@@ -77,7 +75,7 @@ def kmer_frequencies(seqs, k, normalize=False, genome="hg38"):
         output = pd.concat(
             [kmer_frequencies(seq, k, normalize) for seq in seqs], axis=1
         )
-        
+
     output.columns = ids
     return output.T
 
@@ -91,7 +89,8 @@ def unique_kmers(seq, k):
         k (int): length of kmers to extract
 
     Returns:
-        (np.array): a numpy array containing the unique kmers extracted from the sequence
+        (np.array): a numpy array containing the unique kmers extracted from
+            the sequence.
     """
     assert k <= len(
         seq
@@ -143,10 +142,10 @@ def min_edit_distance(seqs, reference_seqs):
     return [_min_edit_distance(seq, reference_seqs) for seq in seqs]
 
 
-def min_edit_distance_from_reference(df, reference_group, group_col='Group'):
+def min_edit_distance_from_reference(df, reference_group, group_col="Group"):
     """
-    For each sequence in non-reference groups, find the smallest edit distance between that sequence
-    and the sequences in the reference group
+    For each sequence in non-reference groups, find the smallest edit distance
+        between that sequence and the sequences in the reference group.
 
     Args:
         df (pd.DataFrame): Dataframe containing sequences in column "Sequence"
@@ -154,22 +153,23 @@ def min_edit_distance_from_reference(df, reference_group, group_col='Group'):
         group_col (str): Name of the column containing group IDs
 
     Returns:
-        edit (np.array): list of edit distance between each sequence  and its closest reference sequence.
+        edit (np.array): list of edit distance between each sequence and its closest
+            reference sequence.
         Set to 0 for reference sequences
     """
     # List nonreference groups
     groups = df[group_col].unique()
-    nonreference_groups = list(groups[groups!=reference_group])
+    nonreference_groups = list(groups[groups != reference_group])
 
     # Create empty array
     edit = np.zeros(len(df), dtype=int)
 
     # Get reference sequences
-    reference_seqs=df.Sequence[df[group_col]==reference_group].tolist()
+    reference_seqs = df.Sequence[df[group_col] == reference_group].tolist()
 
     # Calculate distances
     for group in nonreference_groups:
-        in_group = df[group_col]==group
+        in_group = df[group_col] == group
         group_seqs = df.Sequence[in_group].tolist()
         group_edit = min_edit_distance(group_seqs, reference_seqs)
         edit[in_group] = group_edit
@@ -194,4 +194,4 @@ def bleu_similarity(seqs, reference_seqs, max_k=4):
     reference_seqs = [[s for s in seq] for seq in reference_seqs]
 
     # Calculate score
-    return corpus_bleu(reference_seqs, test_seqs, weights=weights)
+    return corpus_bleu(reference_seqs, seqs, weights=weights)
