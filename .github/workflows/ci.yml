@@ -60,8 +60,8 @@ jobs:
     strategy:
       matrix:
         python:
-        - "3.7"  # oldest Python supported by PSF
-        - "3.11"  # newest Python that is stable
+        - "3.8"  # oldest Python supported by PSF
+        - "3.10"  # newest Python that is stable
         platform:
         - ubuntu-latest
         - macos-latest
@@ -105,7 +105,7 @@ jobs:
     name: Push Sphinx Pages
     runs-on: ubuntu-latest
     steps:
-    - uses: seanzhengw/sphinx-pages@master
+    - uses: seanzhengw/sphinx-pages@main
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         create_readme: false
