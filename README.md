@@ -15,3 +15,11 @@ This package evaluates and compares groups of nucleic acid sequences based on th
 ## Preprint
 
 [bioRxiv](https://www.biorxiv.org/content/10.1101/2023.11.27.568764)
+
+## Installation
+
+```
+git clone https://github.com/Genentech/polygraph.git
+cd polygraph
+pip install .
+```
