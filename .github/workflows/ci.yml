@@ -106,7 +106,7 @@ jobs:
           pip install myst-parser[linkify] sphinx>=3.2.1
       - name: Sphinx build
         run: |
-          sphinx-build doc _build
+          sphinx-build docs _build
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
