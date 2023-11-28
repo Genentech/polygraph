@@ -10,4 +10,4 @@ This package evaluates and compares groups of nucleic acid sequences based on th
 
 ## Tutorials
 
-[Tutorials](https://github.com/Genentech/polygraph/tutorials)
+[Tutorials](tutorials)
