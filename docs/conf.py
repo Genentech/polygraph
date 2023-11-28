@@ -106,7 +106,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "polygraph"
-copyright = "2023, lala8"
+copyright = "2023, Genentech, inc."
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
