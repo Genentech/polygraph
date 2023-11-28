@@ -117,7 +117,7 @@ def load_jaspar(
         download_dir, f"JASPAR2022_CORE_{family}_non-redundant_pfms_jaspar.txt"
     )
     if not os.path.exists(local_path):
-        os.system(f"wget -P {download_dir} {url}")
+        os.system(f"wget --no-check-certificate -P {download_dir} {url}")
 
     # Read
     return read_jaspar(local_path)
