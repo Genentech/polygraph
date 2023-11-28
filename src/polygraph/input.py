@@ -1,7 +1,6 @@
 import os
 
 import Bio.motifs
-import Bio.motifs.jaspar
 import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +63,8 @@ def read_jaspar(file):
         List of Bio.motif objects
 
     """
+    import Bio.motifs.jaspar
+
     return list(Bio.motifs.jaspar.read(open(file, "r"), format="jaspar"))
 
 

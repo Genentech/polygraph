@@ -4,7 +4,6 @@ import pandas as pd
 import plotnine as p9
 import seaborn as sns
 from scipy.cluster.hierarchy import dendrogram, linkage
-from upsetplot import UpSet
 
 
 def boxplot(data, value_col, group_col="Group", fill_col=None):
@@ -155,6 +154,8 @@ def upset_plot(ad, group_col="Group"):
     """
     Plot UpSet plot
     """
+    from upsetplot import UpSet
+
     groups = ad.obs[group_col].unique()
 
     df = pd.DataFrame()

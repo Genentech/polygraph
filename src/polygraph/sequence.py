@@ -3,7 +3,6 @@ import itertools
 import editdistance
 import numpy as np
 import pandas as pd
-from nltk.translate.bleu_score import corpus_bleu
 
 STANDARD_BASES = ["A", "C", "G", "T"]
 
@@ -187,6 +186,8 @@ def bleu_similarity(seqs, reference_seqs, max_k=4):
         max_k (int): Highest k-mer length for calculation. All k-mers of
         length 1 to max_k inclusive will be considered.
     """
+    from nltk.translate.bleu_score import corpus_bleu
+
     weights = [1 / max_k] * max_k
 
     # Split into characters

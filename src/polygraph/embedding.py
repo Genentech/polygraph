@@ -1,4 +1,3 @@
-import anndata
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -306,8 +305,10 @@ def embedding_analysis(
         Test for between group difference in Distance to the closest reference
             sequence (.uns["ref_dist_test"])
     """
+    from anndata import AnnData
+
     print("Creating AnnData object")
-    ad = anndata.AnnData(matrix)
+    ad = AnnData(matrix)
     ad.obs = seqs
     ad = ad[:, ad.X.sum(0) > 0]
 
