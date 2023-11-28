@@ -6,16 +6,10 @@ name: tests
 
 on:
   push:
-    # Avoid using all the resources/limits available by checking only
-    # relevant branches and tags. Other branches can be checked via PRs.
     branches: [main]
     tags: ['v[0-9]*', '[0-9]+.[0-9]+*']  # Match tags that resemble a version
   pull_request:  # Run in every PR
   workflow_dispatch:  # Allow manually triggering the workflow
-  schedule:
-    # Run roughly every 15 days at 00:00 UTC
-    # (useful to check if updates on dependencies break the package)
-    - cron: '0 0 1,16 * *'
 
 permissions:
   contents: read
@@ -61,7 +55,7 @@ jobs:
       matrix:
         python:
         - "3.8"  # oldest Python supported by PSF
-        - "3.10"  # newest Python that is stable
+        - "3.11"  # newest Python that is stable
         platform:
         - ubuntu-latest
         - macos-latest
@@ -105,11 +99,21 @@ jobs:
     name: Push Sphinx Pages
     runs-on: ubuntu-latest
     steps:
-    - uses: seanzhengw/sphinx-pages@master
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        create_readme: false
-
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v3
+      - name: Install dependencies
+        run: |
+          pip install myst-parser[linkify] sphinx>=3.2.1
+      - name: Sphinx build
+        run: |
+          sphinx-build doc _build
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _build/
+          force_orphan: true
 #  publish:
 #    needs: finalize
 #    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
