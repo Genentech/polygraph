@@ -1,4 +1,5 @@
 Biopython
+editdistance
 enformer_pytorch
 importlib-metadata
 MOODS-python
