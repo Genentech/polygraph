@@ -11,3 +11,7 @@ This package evaluates and compares groups of nucleic acid sequences based on th
 ## Tutorials
 
 [Tutorials](tutorials)
+
+## Preprint
+
+[bioRxiv](https://www.biorxiv.org/content/10.1101/2023.11.27.568764)
