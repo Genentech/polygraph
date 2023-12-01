@@ -128,7 +128,7 @@ def one_nn_stats(ad, reference_group, group_col="Group", use_pca=False):
     one_nn_group_df = (
         ad.obs[[group_col, "one_nn_group"]]
         .value_counts()
-        .reset_index()
+        .reset_index(name='count')
         .pivot_table(index=group_col, columns="one_nn_group", values="count")
         .fillna(0)
         .astype(int)
