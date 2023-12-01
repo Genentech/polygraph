@@ -33,7 +33,7 @@ def groupwise_fishers(
     nonreference_groups = groups[groups != reference_group]
 
     # Select group and value columns
-    cont = data[[group_col, val_col]]
+    cont = data[[group_col, val_col]].copy()
 
     # If desired, binarize the values
     if reference_val is not None:
