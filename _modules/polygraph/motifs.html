@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>polygraph.motifs &#8212; polygraph unknown documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css?v=233b9934" />
+    <script src="../../_static/documentation_options.js?v=3f1b9271"></script>
+    <script src="../../_static/doctools.js?v=888ff710"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for polygraph.motifs</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">multiprocessing</span> <span class="k">as</span> <span class="nn">mp</span>
+
+<span class="kn">import</span> <span class="nn">MOODS.scan</span>
+<span class="kn">import</span> <span class="nn">MOODS.tools</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">from</span> <span class="nn">sklearn.decomposition</span> <span class="kn">import</span> <span class="n">NMF</span>
+<span class="kn">from</span> <span class="nn">statsmodels.stats.multitest</span> <span class="kn">import</span> <span class="n">fdrcorrection</span>
+
+<span class="kn">from</span> <span class="nn">polygraph.stats</span> <span class="kn">import</span> <span class="n">groupwise_fishers</span><span class="p">,</span> <span class="n">groupwise_mann_whitney</span>
+
+
+<div class="viewcode-block" id="process_motif">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.process_motif">[docs]</a>
+<span class="k">def</span> <span class="nf">process_motif</span><span class="p">(</span><span class="n">motif</span><span class="p">,</span> <span class="n">pseudocounts</span><span class="o">=</span><span class="mf">1e-2</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Compute log odds and threshold for a PWM.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        motif (Bio.motif): Biopython motif object</span>
+<span class="sd">        pseudocounts (float): Pseudocount to add to matrix before log odds calculation</span>
+<span class="sd">        p (float): p-value for motif match threshold</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">        motif (Bio.motif): Processed motif object, containing attributes `log_odds`</span>
+<span class="sd">            and `threshold`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Calculate log odds (PWM) matrix using pseudocount</span>
+    <span class="n">motif</span><span class="o">.</span><span class="n">log_odds</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span>
+        <span class="n">motif</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">pseudocounts</span><span class="o">=</span><span class="n">pseudocounts</span><span class="p">)</span><span class="o">.</span><span class="n">log_odds</span><span class="p">()</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Calculate p-value threshold using MOODS</span>
+    <span class="n">motif</span><span class="o">.</span><span class="n">threshold</span> <span class="o">=</span> <span class="n">MOODS</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">threshold_from_p</span><span class="p">(</span>
+        <span class="n">motif</span><span class="o">.</span><span class="n">log_odds</span><span class="p">,</span> <span class="n">MOODS</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">flat_bg</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span> <span class="n">p</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">motif</span></div>
+
+
+
+<div class="viewcode-block" id="moods_scan">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.moods_scan">[docs]</a>
+<span class="k">def</span> <span class="nf">moods_scan</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">motifs</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Scan a sequence with a list of motifs using MOODS</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seq (str): DNA sequence</span>
+<span class="sd">        motifs (list): List of Bio.motif objects</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        MOODS scan results</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">MOODS</span><span class="o">.</span><span class="n">scan</span><span class="o">.</span><span class="n">scan_dna</span><span class="p">(</span>
+        <span class="n">seq</span><span class="p">,</span>
+        <span class="p">[</span><span class="n">motif</span><span class="o">.</span><span class="n">log_odds</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">motifs</span><span class="p">],</span>
+        <span class="n">MOODS</span><span class="o">.</span><span class="n">tools</span><span class="o">.</span><span class="n">flat_bg</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span>
+        <span class="p">[</span><span class="n">motif</span><span class="o">.</span><span class="n">threshold</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">motifs</span><span class="p">],</span>
+        <span class="mi">7</span><span class="p">,</span>
+    <span class="p">)</span></div>
+
+
+
+<span class="k">def</span> <span class="nf">_motif_count</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">motifs</span><span class="p">,</span> <span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Count the number of occurrences of motifs in a sequence</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">div</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="n">normalize</span><span class="p">:</span>
+        <span class="n">div</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">/</span> <span class="n">div</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">moods_scan</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">motifs</span><span class="p">)]</span>
+
+
+<div class="viewcode-block" id="motif_frequencies">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.motif_frequencies">[docs]</a>
+<span class="k">def</span> <span class="nf">motif_frequencies</span><span class="p">(</span>
+    <span class="n">seqs</span><span class="p">,</span> <span class="n">motifs</span><span class="p">,</span> <span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">pseudocounts</span><span class="o">=</span><span class="mf">1e-2</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mf">1e-3</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Count frequency of occurrence of motifs in a list of sequences</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seqs (pd.DataFrame): Pandas dataframe containing DNA sequences.</span>
+<span class="sd">        motifs (list): List of Bio.motif objects</span>
+<span class="sd">        normalize (bool): Whether to normalize the resulting count matrix</span>
+<span class="sd">            to correct for sequence length</span>
+<span class="sd">        num_workers (int): Number of parallel workers for scanning</span>
+<span class="sd">        pseudocounts (float): Pseudocount to add to matrix before log odds calculation</span>
+<span class="sd">        p (float): p-value for motif match threshold</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Processing motifs&quot;</span><span class="p">)</span>
+    <span class="n">motifs</span> <span class="o">=</span> <span class="p">[</span><span class="n">process_motif</span><span class="p">(</span><span class="n">motif</span><span class="p">,</span> <span class="n">pseudocounts</span><span class="o">=</span><span class="n">pseudocounts</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">motifs</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Scanning&quot;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">mp</span><span class="o">.</span><span class="n">Pool</span><span class="p">(</span><span class="n">num_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+        <span class="n">items</span> <span class="o">=</span> <span class="nb">zip</span><span class="p">(</span>
+            <span class="n">seqs</span><span class="o">.</span><span class="n">Sequence</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="p">[</span><span class="n">motifs</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span> <span class="p">[</span><span class="n">normalize</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span>
+        <span class="p">)</span>
+        <span class="n">cts</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">starmap</span><span class="p">(</span><span class="n">_motif_count</span><span class="p">,</span> <span class="n">items</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Assembling count matrix&quot;</span><span class="p">)</span>
+    <span class="n">cts</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">cts</span><span class="p">))</span>
+    <span class="n">cts</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">seqs</span><span class="o">.</span><span class="n">SeqID</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+    <span class="n">cts</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="n">motif</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">motifs</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">cts</span></div>
+
+
+
+<span class="k">def</span> <span class="nf">_moods_results_to_df</span><span class="p">(</span><span class="n">motif</span><span class="p">,</span> <span class="n">results</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Convert MOODS scan results to dataframe</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;MotifID&quot;</span><span class="p">:</span> <span class="n">motif</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+            <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">score</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">],</span>
+            <span class="s2">&quot;start&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">pos</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">],</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;end&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">start</span> <span class="o">+</span> <span class="n">motif</span><span class="o">.</span><span class="n">length</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="k">def</span> <span class="nf">_scan_seq</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">motifs</span><span class="p">,</span> <span class="n">seq_id</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Scan a sequence with motifs using MOODS and return a dataframe</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">moods_scan</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">motifs</span><span class="p">)</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">_moods_results_to_df</span><span class="p">(</span><span class="n">motif</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span> <span class="k">for</span> <span class="n">motif</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">motifs</span><span class="p">,</span> <span class="n">results</span><span class="p">)]</span>
+    <span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">seq_id</span>
+    <span class="k">return</span> <span class="n">results</span>
+
+
+<div class="viewcode-block" id="scan_seqs">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.scan_seqs">[docs]</a>
+<span class="k">def</span> <span class="nf">scan_seqs</span><span class="p">(</span>
+    <span class="n">seqs</span><span class="p">,</span> <span class="n">motifs</span><span class="p">,</span> <span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">group_col</span><span class="o">=</span><span class="s2">&quot;Group&quot;</span><span class="p">,</span> <span class="n">pseudocounts</span><span class="o">=</span><span class="mf">1e-2</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mf">1e-3</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Scan sequences with motifs using MOODS and return a dataframe</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seqs (pd.DataFrame): Pandas dataframe containing DNA sequences.</span>
+<span class="sd">        motifs (list): List of Bio.motif objects</span>
+<span class="sd">        num_workers (int): Number of parallel workers for scanning</span>
+<span class="sd">        group_col (str): Name of column in `seqs` that contains group IDs</span>
+<span class="sd">        pseudocounts (float): Pseudocount to add to matrix before log odds calculation</span>
+<span class="sd">        p (float): p-value for motif match threshold</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Processing motifs&quot;</span><span class="p">)</span>
+    <span class="n">motifs</span> <span class="o">=</span> <span class="p">[</span><span class="n">process_motif</span><span class="p">(</span><span class="n">motif</span><span class="p">,</span> <span class="n">pseudocounts</span><span class="o">=</span><span class="n">pseudocounts</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">motifs</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Scanning&quot;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">mp</span><span class="o">.</span><span class="n">Pool</span><span class="p">(</span><span class="n">num_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+        <span class="n">items</span> <span class="o">=</span> <span class="nb">zip</span><span class="p">(</span><span class="n">seqs</span><span class="o">.</span><span class="n">Sequence</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="p">[</span><span class="n">motifs</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span> <span class="n">seqs</span><span class="o">.</span><span class="n">SeqID</span><span class="o">.</span><span class="n">tolist</span><span class="p">())</span>
+        <span class="n">sites</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">starmap</span><span class="p">(</span><span class="n">_scan_seq</span><span class="p">,</span> <span class="n">items</span><span class="p">)</span>
+
+    <span class="c1"># Construct dataframe of results</span>
+    <span class="n">sites</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">sites</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">sites</span> <span class="o">=</span> <span class="n">sites</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">seqs</span><span class="p">[[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="n">group_col</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sites</span></div>
+
+
+
+<div class="viewcode-block" id="nmf">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.nmf">[docs]</a>
+<span class="k">def</span> <span class="nf">nmf</span><span class="p">(</span><span class="n">counts</span><span class="p">,</span> <span class="n">seqs</span><span class="p">,</span> <span class="n">reference_group</span><span class="p">,</span> <span class="n">group_col</span><span class="o">=</span><span class="s2">&quot;Group&quot;</span><span class="p">,</span> <span class="n">n_components</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform NMF on motif count matrix</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        counts (pd.DataFrame): motif count matrix where rows are sequences and columns</span>
+<span class="sd">            are motifs.</span>
+<span class="sd">        seqs (pd.DataFrame): pandas dataframe containing DNA sequences.</span>
+<span class="sd">        reference_group (str): ID for the group to use as reference</span>
+<span class="sd">        group_col (str): Name of the column in `seqs` containing group IDs</span>
+<span class="sd">        n_components (int): Number of components or factors to extract using NMF</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        W (pd.DataFrame): Pandas dataframe of size sequences x factors, containing</span>
+<span class="sd">            the contribution of each factor to each sequence.</span>
+<span class="sd">        H (pd.DataFrame): Pandas dataframe of size factors x motifs, containing the</span>
+<span class="sd">            contribution of each motif to each factor.</span>
+<span class="sd">        res (pd.DataFrame): Pandas dataframe containing the FDR-corrected significance</span>
+<span class="sd">            testing results for factor contribution between groups.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Run NMF</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">NMF</span><span class="p">(</span><span class="n">n_components</span><span class="o">=</span><span class="n">n_components</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="s2">&quot;random&quot;</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># Obtain W and H matrices</span>
+    <span class="n">W</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">counts</span><span class="o">.</span><span class="n">values</span><span class="p">))</span>  <span class="c1"># seqs x factors</span>
+    <span class="n">H</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">components_</span><span class="p">)</span>  <span class="c1"># factors x motifs</span>
+
+    <span class="c1"># Format W and H matrices</span>
+    <span class="n">factors</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;factor_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_components</span><span class="p">)]</span>
+    <span class="n">W</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">index</span>
+    <span class="n">W</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="n">factors</span>
+    <span class="n">H</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">factors</span>
+    <span class="n">H</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">columns</span>
+
+    <span class="c1"># Add group IDs to W</span>
+    <span class="n">W</span><span class="p">[</span><span class="n">group_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">seqs</span><span class="p">[</span><span class="n">group_col</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+
+    <span class="c1"># Significance testing between groups</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">W</span><span class="o">.</span><span class="n">columns</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]:</span>
+        <span class="c1"># For each factor, test whether its abundance differs between groups</span>
+        <span class="n">factor_res</span> <span class="o">=</span> <span class="n">groupwise_mann_whitney</span><span class="p">(</span>
+            <span class="n">W</span><span class="p">,</span> <span class="n">val_col</span><span class="o">=</span><span class="n">col</span><span class="p">,</span> <span class="n">reference_group</span><span class="o">=</span><span class="n">reference_group</span><span class="p">,</span> <span class="n">group_col</span><span class="o">=</span><span class="n">group_col</span>
+        <span class="p">)</span>
+        <span class="n">factor_res</span><span class="p">[</span><span class="s2">&quot;factor&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">col</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">res</span><span class="p">,</span> <span class="n">factor_res</span><span class="p">])</span>
+
+    <span class="c1"># FDR correction</span>
+    <span class="n">res</span><span class="p">[</span><span class="s2">&quot;padj&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fdrcorrection</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">pval</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">W</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">res</span></div>
+
+
+
+<div class="viewcode-block" id="motif_combinations">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.motifs.motif_combinations">[docs]</a>
+<span class="k">def</span> <span class="nf">motif_combinations</span><span class="p">(</span>
+    <span class="n">counts</span><span class="p">,</span>
+    <span class="n">seqs</span><span class="p">,</span>
+    <span class="n">reference_group</span><span class="p">,</span>
+    <span class="n">group_col</span><span class="o">=</span><span class="s2">&quot;Group&quot;</span><span class="p">,</span>
+    <span class="n">min_group_freq</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+    <span class="n">min_group_prop</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Count occurences of pairwise combinations of motifs and compare between groups</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        counts (pd.DataFrame): Pandas dataframe containing the motif count matrix.</span>
+<span class="sd">            Rows should be sequences and columns should be motifs.</span>
+<span class="sd">        seqs (pd.DataFrame): Pandas dataframe containing sequences</span>
+<span class="sd">        reference_group (str): ID of group to use as reference</span>
+<span class="sd">        group_col (str): Name of column in `seqs` containing group IDs</span>
+<span class="sd">        min_group_freq (int): Limit to combinations with this number of occurences in</span>
+<span class="sd">            at least one group.</span>
+<span class="sd">        min_group_prop (float): Limit to combinations with this proportion of occurences</span>
+<span class="sd">            in at least one group.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance</span>
+<span class="sd">            testing results for the occurrence of pairwise combinations between groups</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Listing motif combinations&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Get the complete set of motifs present in each sequence</span>
+    <span class="n">motif_combinations</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">row</span><span class="p">:</span> <span class="nb">set</span><span class="p">(</span><span class="n">counts</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">row</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)[</span><span class="mi">0</span><span class="p">]]),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="n">motif_combinations</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="s2">&quot;motifs&quot;</span><span class="p">]</span>
+    <span class="n">motif_combinations</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">seqs</span><span class="p">[[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="n">group_col</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;SeqID&quot;</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Get pairwise combinations present in each sequence</span>
+    <span class="n">motif_combinations</span><span class="p">[</span><span class="s2">&quot;combination&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="o">.</span><span class="n">motifs</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">itertools</span><span class="o">.</span><span class="n">combinations</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+    <span class="p">)</span>
+    <span class="n">motif_combinations</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="p">[[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="s2">&quot;combination&quot;</span><span class="p">,</span> <span class="s2">&quot;Group&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">explode</span><span class="p">(</span>
+        <span class="s2">&quot;combination&quot;</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Making count matrix&quot;</span><span class="p">)</span>
+    <span class="c1"># Count the number of sequences in which each motif combination is present</span>
+    <span class="n">cts</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">motif_combinations</span><span class="p">[[</span><span class="s2">&quot;combination&quot;</span><span class="p">,</span> <span class="s2">&quot;Group&quot;</span><span class="p">]]</span>
+        <span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+        <span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;count&quot;</span><span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Filtering&quot;</span><span class="p">)</span>
+    <span class="c1"># Drop rare combinations</span>
+    <span class="k">if</span> <span class="n">min_group_freq</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">comb_max</span> <span class="o">=</span> <span class="n">cts</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;combination&quot;</span><span class="p">)[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+        <span class="n">sel_comb</span> <span class="o">=</span> <span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="p">[</span>
+            <span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">comb_max</span><span class="p">[</span><span class="n">comb_max</span> <span class="o">&gt;</span> <span class="n">min_group_freq</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+        <span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Selected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)</span><span class="si">}</span><span class="s2"> combinations&quot;</span><span class="p">)</span>
+        <span class="n">motif_combinations</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="p">[</span>
+            <span class="n">motif_combinations</span><span class="o">.</span><span class="n">combination</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">cts</span> <span class="o">=</span> <span class="n">cts</span><span class="p">[</span><span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)]</span>
+
+    <span class="k">elif</span> <span class="n">min_group_prop</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">cts</span><span class="p">[</span><span class="s2">&quot;group_total&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">seqs</span><span class="o">.</span><span class="n">Group</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()[</span><span class="n">cts</span><span class="o">.</span><span class="n">Group</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">cts</span><span class="p">[</span><span class="s2">&quot;group_prop&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cts</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">cts</span><span class="o">.</span><span class="n">group_total</span>
+        <span class="c1"># print(cts)</span>
+        <span class="n">sel_comb</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="p">[</span><span class="n">cts</span><span class="o">.</span><span class="n">group_prop</span> <span class="o">&gt;</span> <span class="n">min_group_prop</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Selected </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)</span><span class="si">}</span><span class="s2"> combinations&quot;</span><span class="p">)</span>
+        <span class="n">motif_combinations</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="p">[</span>
+            <span class="n">motif_combinations</span><span class="o">.</span><span class="n">combination</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)</span>
+        <span class="p">]</span>
+        <span class="n">cts</span> <span class="o">=</span> <span class="n">cts</span><span class="p">[</span><span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sel_comb</span><span class="p">)]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Significance testing&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">seqs</span><span class="p">[[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="s2">&quot;Group&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="n">comb</span> <span class="ow">in</span> <span class="n">cts</span><span class="o">.</span><span class="n">combination</span><span class="p">:</span>
+        <span class="n">seqs_with_comb</span> <span class="o">=</span> <span class="n">motif_combinations</span><span class="o">.</span><span class="n">SeqID</span><span class="p">[</span>
+            <span class="n">motif_combinations</span><span class="o">.</span><span class="n">combination</span> <span class="o">==</span> <span class="n">comb</span>
+        <span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="n">df</span><span class="p">[</span><span class="s2">&quot;has_comb&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">SeqID</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">seqs_with_comb</span><span class="p">)</span>
+        <span class="n">curr_res</span> <span class="o">=</span> <span class="n">groupwise_fishers</span><span class="p">(</span>
+            <span class="n">df</span><span class="p">,</span>
+            <span class="n">reference_group</span><span class="o">=</span><span class="n">reference_group</span><span class="p">,</span>
+            <span class="n">val_col</span><span class="o">=</span><span class="s2">&quot;has_comb&quot;</span><span class="p">,</span>
+            <span class="n">reference_val</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">group_col</span><span class="o">=</span><span class="n">group_col</span><span class="p">,</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+        <span class="n">curr_res</span><span class="p">[</span><span class="s2">&quot;combination&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">comb</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">curr_res</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">res</span><span class="p">,</span> <span class="n">curr_res</span><span class="p">])</span>
+
+    <span class="c1"># FDR correction</span>
+    <span class="n">res</span><span class="p">[</span><span class="s2">&quot;padj&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fdrcorrection</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">pval</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="k">return</span> <span class="n">res</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">polygraph</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../readme.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../license.html">License</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../authors.html">Authors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">Module Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2023, Genentech, inc..
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 7.2.6</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.13</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
