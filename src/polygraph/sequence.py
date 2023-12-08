@@ -5,6 +5,13 @@ import numpy as np
 import pandas as pd
 
 STANDARD_BASES = ["A", "C", "G", "T"]
+RC_HASH = {
+    "A": "T",
+    "T": "A",
+    "C": "G",
+    "G": "C",
+    "N": "N",
+}
 
 
 def gc(seqs, sequence_col="Sequence"):
@@ -196,3 +203,22 @@ def bleu_similarity(seqs, reference_seqs, max_k=4):
 
     # Calculate score
     return corpus_bleu(reference_seqs, seqs, weights=weights)
+
+
+def reverse_complement(seqs):
+    """
+    Reverse complement input sequences
+
+    Args:
+        seqs (str, list): DNA sequences as strings
+
+    Returns:
+        reverse complemented sequences
+
+    """
+    if isinstance(seqs, str):
+        return "".join([RC_HASH[base] for base in reversed(seqs)])
+    elif isinstance(seqs, list):
+        return ["".join([RC_HASH[base] for base in reversed(seq)]) for seq in seqs]
+    else:
+        raise TypeError("Input should be a string or a list of strings")
