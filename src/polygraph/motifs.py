@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.decomposition import NMF
 from statsmodels.stats.multitest import fdrcorrection
 
+from polygraph.sequence import reverse_complement
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney
 
 
@@ -67,7 +68,7 @@ def _motif_count(seq, motifs, normalize=True):
 
 
 def motif_frequencies(
-    seqs, motifs, normalize=True, num_workers=8, pseudocounts=1e-2, p=1e-3
+    seqs, motifs, normalize=True, num_workers=8, pseudocounts=1e-2, p=1e-3, rc=False
 ):
     """
     Count frequency of occurrence of motifs in a list of sequences
@@ -80,6 +81,7 @@ def motif_frequencies(
         num_workers (int): Number of parallel workers for scanning
         pseudocounts (float): Pseudocount to add to matrix before log odds calculation
         p (float): p-value for motif match threshold
+        rc (bool): Whether to also scan the reverse complement sequence
 
     Returns:
         cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs
@@ -94,10 +96,31 @@ def motif_frequencies(
         )
         cts = pool.starmap(_motif_count, items)
 
+    if rc:
+        # Reverse complement sequences
+        seqs["Sequence_rc"] = [
+            reverse_complement(seq) for seq in seqs.Sequence.tolist()
+        ]
+
+        print("Scanning reverse strand sequences")
+        with mp.Pool(num_workers) as pool:
+            items = zip(
+                seqs.Sequence_rc.tolist(), [motifs] * len(seqs), [normalize] * len(seqs)
+            )
+            cts_rev = pool.starmap(_motif_count, items)
+
     print("Assembling count matrix")
     cts = pd.DataFrame(np.vstack(cts))
     cts.index = seqs.SeqID.tolist()
     cts.columns = [motif.name for motif in motifs]
+
+    if rc:
+        cts_rev = pd.DataFrame(np.vstack(cts_rev))
+        cts_rev.index = seqs.SeqID.tolist()
+        cts_rev.columns = [motif.name + "_rev" for motif in motifs]
+        cts.columns = [col + "_fwd" for col in cts.columns]
+        cts = pd.concat([cts, cts_rev], axis=1)
+
     return cts
 
 
@@ -129,7 +152,13 @@ def _scan_seq(seq, motifs, seq_id=None):
 
 
 def scan_seqs(
-    seqs, motifs, num_workers=8, group_col="Group", pseudocounts=1e-2, p=1e-3
+    seqs,
+    motifs,
+    num_workers=8,
+    group_col="Group",
+    pseudocounts=1e-2,
+    p=1e-3,
+    rc=False,
 ):
     """
     Scan sequences with motifs using MOODS and return a dataframe
@@ -141,14 +170,15 @@ def scan_seqs(
         group_col (str): Name of column in `seqs` that contains group IDs
         pseudocounts (float): Pseudocount to add to matrix before log odds calculation
         p (float): p-value for motif match threshold
+        rc (bool): Whether to also scan the reverse complement sequence
 
     Returns:
-        cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs
+        sites (pd.DataFrame): Pandas dataframe containing site positions
     """
     print("Processing motifs")
     motifs = [process_motif(motif, pseudocounts=pseudocounts, p=p) for motif in motifs]
 
-    print("Scanning")
+    print("Scanning forward strand sequences")
     with mp.Pool(num_workers) as pool:
         items = zip(seqs.Sequence.tolist(), [motifs] * len(seqs), seqs.SeqID.tolist())
         sites = pool.starmap(_scan_seq, items)
@@ -156,6 +186,44 @@ def scan_seqs(
     # Construct dataframe of results
     sites = pd.concat(sites).reset_index(drop=True)
     sites = sites.merge(seqs[["SeqID", group_col]], on="SeqID", how="left")
+
+    if rc:
+        # Reverse complement sequences
+        seqs["Sequence_rc"] = [
+            reverse_complement(seq) for seq in seqs.Sequence.tolist()
+        ]
+
+        print("Scanning reverse strand sequences")
+        with mp.Pool(num_workers) as pool:
+            items = zip(
+                seqs.Sequence_rc.tolist(), [motifs] * len(seqs), seqs.SeqID.tolist()
+            )
+            sites_rev = pool.starmap(_scan_seq, items)
+
+        # Construct dataframe of results
+        sites_rev = pd.concat(sites_rev).reset_index(drop=True)
+        seqs["len"] = seqs.Sequence.apply(len)
+        sites_rev = sites_rev.merge(
+            seqs[["SeqID", group_col, "len"]], on="SeqID", how="left"
+        )
+
+        # Correct positions
+        start_coords = sites_rev["len"] - sites_rev["end"]
+        end_coords = sites_rev["len"] - sites_rev["start"]
+
+        sites_rev["start"] = start_coords
+        sites_rev["end"] = end_coords
+
+        sites_rev = sites_rev.drop(columns=["len"])
+
+        # Combine
+        sites["strand"] = "fwd"
+        sites_rev["strand"] = "rev"
+        sites = pd.concat([sites, sites_rev])
+
+        # Add strand to motif_id
+        sites["MotifID"] = sites["MotifID"] + "_" + sites["strand"]
+
     return sites
 
 
