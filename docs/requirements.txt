@@ -2,11 +2,11 @@ Biopython
 editdistance
 enformer_pytorch
 importlib-metadata
-pymemesuite
 myst-parser[linkify]
 numpy
 pandas
 plotnine
+pymemesuite
 scanpy
 scikit-learn
 scikit_posthocs
