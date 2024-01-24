@@ -2,7 +2,7 @@ Biopython
 editdistance
 enformer_pytorch
 importlib-metadata
-MOODS-python
+pymemesuite
 myst-parser[linkify]
 numpy
 pandas
