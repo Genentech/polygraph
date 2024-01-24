@@ -99,21 +99,24 @@ class CharDataset(Dataset):
         return self.encode(seq)
 
 
-def compute_likelihood(df, model, batch_size=32, num_workers=1, device="cpu"):
+def compute_likelihood(
+    seqs, model, batch_size=32, num_workers=1, device="cpu", sequence_col="Sequence"
+):
     """
     Function to compute log-likelihood of each sequence in the given list using the
     hyenaDNA model pretrained on the human genome.
 
     Args:
-        df (pd.DataFrame): Dataframe with column 'Sequences'
+        seqs (pd.DataFrame): Dataframe containing DNA sequences
         model (ConvLMHead): HyenaDNA model
         batch_size (int): Batch size for inference
         num_workers (int): Number of workers for inference dataloader
         device (int, str): Device ID for inference
+        sequence_col (str): Column containing sequences
 
     Returns
     """
-    ds = CharDataset(df.Sequences.tolist())
+    ds = CharDataset(seqs[sequence_col].tolist())
     dl = DataLoader(ds, shuffle=False, batch_size=batch_size, num_workers=num_workers)
     model = model.to(torch.device(device))
     LL = []

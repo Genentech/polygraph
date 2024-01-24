@@ -1,8 +1,5 @@
 import itertools
-import multiprocessing as mp
 
-import MOODS.scan
-import MOODS.tools
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import NMF
@@ -11,152 +8,82 @@ from statsmodels.stats.multitest import fdrcorrection
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney
 
 
-def process_motif(motif, pseudocounts=1e-2, p=1e-3):
+def scan(
+    seqs, meme_file, sequence_col="Sequence", group_col="Group", pthresh=1e-3, rc=True
+):
     """
-    Compute log odds and threshold for a PWM.
+    Scan a DNA sequence using motifs from a MEME file
 
     Args:
-        motif (Bio.motif): Biopython motif object
-        pseudocounts (float): Pseudocount to add to matrix before log odds calculation
-        p (float): p-value for motif match threshold
-
-    Returns
-        motif (Bio.motif): Processed motif object, containing attributes `log_odds`
-            and `threshold`.
-    """
-    # Calculate log odds (PWM) matrix using pseudocount
-    motif.log_odds = list(
-        motif.counts.normalize(pseudocounts=pseudocounts).log_odds().values()
-    )
-
-    # Calculate p-value threshold using MOODS
-    motif.threshold = MOODS.tools.threshold_from_p(
-        motif.log_odds, MOODS.tools.flat_bg(4), p
-    )
-    return motif
-
-
-def moods_scan(seq, motifs):
-    """
-    Scan a sequence with a list of motifs using MOODS
-
-    Args:
-        seq (str): DNA sequence
-        motifs (list): List of Bio.motif objects
+        seqs (str): Dataframe containing DNA sequences
+        meme_file (str): Path to MEME file
+        sequence_col (str): Column containing sequences
+        group_col (str): Column containing group IDs
+        pthresh (float): p-value cutoff for binding sites
+        rc (bool): Whether to scan the sequence reverse complement as well
 
     Returns:
-        MOODS scan results
+        pd.DataFrame containing columns 'Matrix_id', 'seq_id', 'start', 'end', 'strand'.
     """
-    return MOODS.scan.scan_dna(
-        seq,
-        [motif.log_odds for motif in motifs],
-        MOODS.tools.flat_bg(4),
-        [motif.threshold for motif in motifs],
-        7,
-    )
+    from collections import defaultdict
+
+    from pymemesuite.common import Sequence
+    from pymemesuite.fimo import FIMO
+
+    from polygraph.input import read_meme_file
+
+    # Load motifs
+    motifs, bg = read_meme_file(meme_file)
+
+    # Format sequences
+    sequences = [
+        Sequence(seq, name=id.encode())
+        for seq, id in zip(seqs[sequence_col].tolist(), seqs["SeqID"].tolist())
+    ]
+
+    # Setup FIMO
+    fimo = FIMO(both_strands=rc, threshold=pthresh)
+
+    # Empty dictionary for output
+    out = defaultdict(list)
+
+    # Scan
+    for motif in motifs:
+        match = fimo.score_motif(motif, sequences, bg).matched_elements
+        for m in match:
+            out["MotifID"].append(motif.name.decode())
+            out["SeqID"].append(m.source.accession.decode())
+            out["start"].append(m.start)
+            out["end"].append(m.stop)
+            out["strand"].append(m.strand)
+
+    return pd.DataFrame(out).merge(seqs[["SeqID", group_col]], on="SeqID")
 
 
-def _motif_count(seq, motifs, normalize=True):
-    """
-    Count the number of occurrences of motifs in a sequence
-    """
-    div = 1
-    if normalize:
-        div = len(seq)
-    return [len(r) / div for r in moods_scan(seq, motifs)]
-
-
-def motif_frequencies(
-    seqs, motifs, normalize=True, num_workers=8, pseudocounts=1e-2, p=1e-3
-):
+def motif_frequencies(sites, normalize=False, seqs=None, sequence_col="Sequence"):
     """
     Count frequency of occurrence of motifs in a list of sequences
 
     Args:
-        seqs (pd.DataFrame): Pandas dataframe containing DNA sequences.
-        motifs (list): List of Bio.motif objects
+        sites (list): Output of `scan` function
         normalize (bool): Whether to normalize the resulting count matrix
             to correct for sequence length
-        num_workers (int): Number of parallel workers for scanning
-        pseudocounts (float): Pseudocount to add to matrix before log odds calculation
-        p (float): p-value for motif match threshold
-
-    Returns:
-        cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs
-    """
-    print("Processing motifs")
-    motifs = [process_motif(motif, pseudocounts=pseudocounts, p=p) for motif in motifs]
-
-    print("Scanning")
-    with mp.Pool(num_workers) as pool:
-        items = zip(
-            seqs.Sequence.tolist(), [motifs] * len(seqs), [normalize] * len(seqs)
-        )
-        cts = pool.starmap(_motif_count, items)
-
-    print("Assembling count matrix")
-    cts = pd.DataFrame(np.vstack(cts))
-    cts.index = seqs.SeqID.tolist()
-    cts.columns = [motif.name for motif in motifs]
-    return cts
-
-
-def _moods_results_to_df(motif, results):
-    """
-    Convert MOODS scan results to dataframe
-    """
-    df = pd.DataFrame.from_dict(
-        {
-            "MotifID": motif.name,
-            "score": [r.score for r in results],
-            "start": [r.pos for r in results],
-        }
-    )
-    df["end"] = df.start + motif.length
-    return df
-
-
-def _scan_seq(seq, motifs, seq_id=None):
-    """
-    Scan a sequence with motifs using MOODS and return a dataframe
-    """
-    results = moods_scan(seq, motifs)
-    results = pd.concat(
-        [_moods_results_to_df(motif, res) for motif, res in zip(motifs, results)]
-    )
-    results["SeqID"] = seq_id
-    return results
-
-
-def scan_seqs(
-    seqs, motifs, num_workers=8, group_col="Group", pseudocounts=1e-2, p=1e-3
-):
-    """
-    Scan sequences with motifs using MOODS and return a dataframe
-
-    Args:
         seqs (pd.DataFrame): Pandas dataframe containing DNA sequences.
-        motifs (list): List of Bio.motif objects
-        num_workers (int): Number of parallel workers for scanning
-        group_col (str): Name of column in `seqs` that contains group IDs
-        pseudocounts (float): Pseudocount to add to matrix before log odds calculation
-        p (float): p-value for motif match threshold
+            Needed if normalize=True.
+        sequence_col (str): Column in seqs containing DNA sequences.
 
     Returns:
         cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs
     """
-    print("Processing motifs")
-    motifs = [process_motif(motif, pseudocounts=pseudocounts, p=p) for motif in motifs]
-
-    print("Scanning")
-    with mp.Pool(num_workers) as pool:
-        items = zip(seqs.Sequence.tolist(), [motifs] * len(seqs), seqs.SeqID.tolist())
-        sites = pool.starmap(_scan_seq, items)
-
-    # Construct dataframe of results
-    sites = pd.concat(sites).reset_index(drop=True)
-    sites = sites.merge(seqs[["SeqID", group_col]], on="SeqID", how="left")
-    return sites
+    cts = sites[["MotifID", "SeqID"]].value_counts().reset_index(name="count")
+    cts = cts.pivot_table(
+        index="SeqID", columns="MotifID", values="count", fill_value=0
+    )
+    if normalize:
+        assert seqs is not None, "seqs must be provided for normalization"
+        seq_lens = seqs.set_index("SeqID")[sequence_col].apply(len)[cts.index]
+        cts = cts.divide(seq_lens.tolist(), axis=0)
+    return cts
 
 
 def nmf(counts, seqs, reference_group, group_col="Group", n_components=10):
@@ -254,14 +181,14 @@ def motif_combinations(
     motif_combinations["combination"] = motif_combinations.motifs.apply(
         lambda x: list(itertools.combinations(x, 2))
     )
-    motif_combinations = motif_combinations[["SeqID", "combination", "Group"]].explode(
-        "combination"
-    )
+    motif_combinations = motif_combinations[
+        ["SeqID", "combination", group_col]
+    ].explode("combination")
 
     print("Making count matrix")
     # Count the number of sequences in which each motif combination is present
     cts = (
-        motif_combinations[["combination", "Group"]]
+        motif_combinations[["combination", group_col]]
         .value_counts()
         .reset_index(name="count")
     )
@@ -291,10 +218,10 @@ def motif_combinations(
         cts = cts[cts.combination.isin(sel_comb)]
 
     print("Significance testing")
-    df = seqs[["SeqID", "Group"]].copy()
+    df = seqs[["SeqID", group_col]].copy()
     res = pd.DataFrame()
 
-    for comb in cts.combination:
+    for comb in cts.combination.unique():
         seqs_with_comb = motif_combinations.SeqID[
             motif_combinations.combination == comb
         ].tolist()

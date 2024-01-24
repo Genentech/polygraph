@@ -68,8 +68,8 @@ def plot_seqs_nmf(W, reorder=True):
 
         # Melt dataframe
         W_norm["Group"] = groups
-        W_norm = W_norm.reset_index().melt(id_vars=["index", "Group"])
-        W_norm["order"] = W_norm["index"].map(order_dict)
+        W_norm = W_norm.reset_index().melt(id_vars=["SeqID", "Group"])
+        W_norm["order"] = W_norm["SeqID"].map(order_dict)
 
         return (
             p9.ggplot(W_norm, p9.aes(x="order", y="value", fill="variable"))
@@ -110,31 +110,44 @@ def plot_factors_nmf(H, n_features=50):
     )
 
 
-def pca_plot(ad, group_col="Group", components=[0, 1], size=0.1):
+def pca_plot(
+    ad,
+    group_col="Group",
+    components=[0, 1],
+    size=0.1,
+    show_ellipse=True,
+    reference_group=None,
+):
     """
     Plot PCA embeddings of sequences
     """
     assert len(components) == 2
     df = pd.DataFrame(ad.obsm["X_pca"][:, components])
-    var = np.round(ad.uns["pca"]["variance_ratio"], 2)[components]
+    var = np.round(ad.uns["pca"]["variance_ratio"] * 100, 2)[components]
     col1 = f"PC{(components[0] + 1)}"
     col2 = f"PC{(components[1] + 1)}"
     xlab = col1 + f" ({str(var[0])}%)"
     ylab = col2 + f" ({str(var[1])}%)"
     df.columns = [col1, col2]
     df[group_col] = ad.obs[group_col].tolist()
+    if reference_group is not None:
+        df = pd.concat(
+            [df[df[group_col] == reference_group], df[df[group_col] != reference_group]]
+        )
 
-    return (
+    g = (
         p9.ggplot(df, p9.aes(x=col1, y=col2, color=group_col))
         + p9.geom_point(size=size)
-        + p9.stat_ellipse()
         + p9.xlab(xlab)
         + p9.ylab(ylab)
         + p9.theme_classic()
     )
+    if show_ellipse:
+        g = g + p9.stat_ellipse()
+    return g
 
 
-def umap_plot(ad, group_col="Group", size=0.1):
+def umap_plot(ad, group_col="Group", size=0.1, show_ellipse=True):
     """
     Plot UMAP embeddings of sequences
     """
@@ -142,11 +155,42 @@ def umap_plot(ad, group_col="Group", size=0.1):
     df.columns = ["UMAP1", "UMAP2"]
     df[group_col] = ad.obs[group_col].tolist()
 
-    return (
+    g = (
         p9.ggplot(df, p9.aes(x="UMAP1", y="UMAP2", color=group_col))
         + p9.geom_point(size=size)
-        + p9.stat_ellipse()
         + p9.theme_classic()
+    )
+    if show_ellipse:
+        g = g + p9.stat_ellipse()
+    return g
+
+
+def one_nn_frac_plot(ad, reference_group, group_col="Group", fill_col=None):
+    """
+    Plot a barplot showing the one-nearest neighbor fraction among reference group
+    """
+    totals = ad.obs[group_col].value_counts()
+    nn_cts = (
+        ad.obs.loc[ad.obs.one_nn_group == reference_group, group_col]
+        .value_counts()
+        .reset_index()
+    )
+    nn_cts["total"] = totals[nn_cts[group_col]].tolist()
+    nn_cts["frac"] = nn_cts["count"] / nn_cts["total"]
+    ref_frac = nn_cts[nn_cts[group_col] == reference_group].frac.tolist()
+
+    g = (
+        p9.ggplot(nn_cts, p9.aes(x=group_col, y="frac"))
+        if fill_col is None
+        else p9.ggplot(nn_cts, p9.aes(x=group_col, y="frac", fill=fill_col))
+    )
+    return (
+        g
+        + p9.geom_bar(stat="identity", position="dodge")
+        + p9.theme_classic()
+        + p9.theme(axis_text_x=p9.element_text(rotation=60, hjust=1))
+        + p9.ylab("Fraction of sequences\nwith reference\nnearest neighbor")
+        + p9.geom_hline(yintercept=ref_frac, linetype="dashed")
     )
 
 

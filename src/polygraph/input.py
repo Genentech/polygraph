@@ -1,6 +1,5 @@
 import os
 
-import Bio.motifs
 import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -52,47 +51,35 @@ def read_seqs(file, sep="\t", incl_ids=False):
     return df
 
 
-def read_jaspar(file):
+def read_meme_file(file):
     """
-    Read motifs from a JASPAR format file
+    Read a motif database in MEME format
 
     Args:
-        file (str): Path to JASPAR format file
+        file (str): path to MEME file
 
     Returns:
-        List of Bio.motif objects
-
+        motifs (list): List of pymemesuite.common.Motif objects
+        bg (pymemesuite.common.Background): Background distribution
     """
-    import Bio.motifs.jaspar
+    from pymemesuite.common import MotifFile
 
-    return list(Bio.motifs.jaspar.read(open(file, "r"), format="jaspar"))
+    # Open file
+    motiffile = MotifFile(file)
 
-
-def read_pfms(dir):
-    """
-    Read motifs from a directory containing .pfm files
-
-    Args:
-        dir (str): Path to directory containing .pfm files
-
-    Returns:
-        motifs (list): List of Bio.motif objects
-    """
+    # Read motifs until file end
     motifs = []
-    for file in os.listdir(dir):
-        # get path to .pfm file
-        path = os.path.join(dir, file)
+    while True:
+        motif = motiffile.read()
+        if motif is None:
+            break
+        motifs.append(motif)
 
-        # Read
-        m = Bio.motifs.parse(open(path, "r"), fmt="pfm-four-rows", strict=True)[0]
-
-        # Take motif name from file name
-        m.name = os.path.splitext(file)[0]
-        motifs.append(m)
-    return motifs
+    print(f"Read {len(motifs)} motifs from file.")
+    return motifs, motiffile.background
 
 
-def load_jaspar(
+def download_jaspar(
     family="vertebrates", download_dir=os.path.join(resources_dir, "jaspar")
 ):
     """
@@ -104,46 +91,23 @@ def load_jaspar(
         download_dir (str): Path to directory in which to download motifs
 
     Returns:
-        List of Bio.motif objects
+        motifs (list): List of pymemesuite.common.Motif objects
+        bg (pymemesuite.common.Background): Background distribution
     """
     # Create download directory
     if not os.path.exists(download_dir):
         os.makedirs(download_dir)
 
     # Download
-    jaspar_core_url = "https://jaspar.genereg.net/download/data/2022/CORE/"
-    url = f"{jaspar_core_url}JASPAR2022_CORE_{family}_non-redundant_pfms_jaspar.txt"
-    local_path = os.path.join(
-        download_dir, f"JASPAR2022_CORE_{family}_non-redundant_pfms_jaspar.txt"
+    jaspar_core_prefix = (
+        "https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_"
     )
-    if not os.path.exists(local_path):
-        os.system(f"wget --no-check-certificate -P {download_dir} {url}")
 
-    # Read
-    return read_jaspar(local_path)
+    url = f"{jaspar_core_prefix}{family}_non-redundant_pfms_meme.txt"
+    local_path = os.path.join(
+        download_dir, f"JASPAR2022_CORE_{family}_non-redundant_pfms_meme.txt"
+    )
+    assert not os.path.exists(local_path), f"File already exists at {local_path}"
+    os.system(f"wget --no-check-certificate -P {download_dir} {url}")
 
-
-def load_yetfasco(download_dir=os.path.join(resources_dir, "yetfasco")):
-    """
-    Download and read the YeTFaSCo database of yeast TF motifs
-
-    Args:
-        download_dir (str): Path to directory in which to download motifs
-
-    Returns:
-        List of Bio.motif objects
-    """
-    # Create download directory
-    if not os.path.exists(download_dir):
-        os.makedirs(download_dir)
-
-    # Download
-    url = "http://yetfasco.ccbr.utoronto.ca/1.02/Downloads/Expert_PFMs.zip"
-    local_path = os.path.join(download_dir, "Expert_PFMs.zip")
-    local_dir = os.path.join(download_dir, "1.02/ALIGNED_ENOLOGO_FORMAT_PFMS")
-    if not os.path.exists(local_dir):
-        os.system(f"wget -P {download_dir} {url}")
-        os.system("unzip {} -d {}".format(local_path, download_dir))
-
-    # Read
-    return read_pfms(local_dir)
+    return str(local_path)

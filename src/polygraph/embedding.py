@@ -79,6 +79,9 @@ def differential_analysis(ad, reference_group, group_col="Group"):
     diff["padj"] = pd.DataFrame(ad.uns["rank_genes_groups"]["pvals_adj"]).melt()[
         "value"
     ]
+    diff["log2FC"] = pd.DataFrame(ad.uns["rank_genes_groups"]["logfoldchanges"]).melt()[
+        "value"
+    ]
 
     # Add to .uns
     ad.uns["DE_test"] = diff
