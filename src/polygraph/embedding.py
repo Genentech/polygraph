@@ -1,15 +1,18 @@
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from scipy.stats import fisher_exact
 from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import NearestNeighbors
+from statsmodels.stats.multitest import fdrcorrection
 
+from polygraph.classifier import groupwise_svm
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney, kruskal_dunn
 
 
 def embedding_pca(ad, **kwargs):
     """
-    Perform PCA on sequence embeddings
+    Perform PCA on sequence embeddings.
 
     Args:
         ad (anndata.AnnData): Anndata object containing sequence embeddings
@@ -21,10 +24,7 @@ def embedding_pca(ad, **kwargs):
     """
     sc.pp.pca(ad, **kwargs)
     print(
-        "Fraction of variance explained: ", np.round(ad.uns["pca"]["variance_ratio"], 2)
-    )
-    print(
-        "Fraction of total variance explained: ",
+        "Fraction of total variance explained by PCA components: ",
         np.sum(ad.uns["pca"]["variance_ratio"]),
     )
     return ad
@@ -89,12 +89,10 @@ def differential_analysis(ad, reference_group, group_col="Group"):
     return ad
 
 
-def one_nn_stats(ad, reference_group, group_col="Group", use_pca=False):
+def groupwise_1nn(ad, reference_group, group_col="Group", use_pca=False):
     """
-    Calculate the following 1-nearest neighbor statistics based on the
-    sequence embeddings:
-    1. Group ID of nearest neighbor
-    2. Distance to nearest neighbor
+    For each sequence, find its nearest neighbor among its own group or
+    the reference group based on the sequence embeddings.
 
     Args:
         ad (anndata.AnnData): Anndata object containing sequence embeddings of
@@ -109,7 +107,92 @@ def one_nn_stats(ad, reference_group, group_col="Group", use_pca=False):
             probability table of nearest neighbor groups for each group
         in .uns
     """
+    res = pd.DataFrame()
 
+    # Get reference embedding
+    in_ref = ad.obs[group_col] == reference_group
+
+    # List groups
+    groups = ad.obs[group_col].unique()
+
+    # List nonreference groups
+    nonreference_groups = groups[groups != reference_group]
+
+    for group in nonreference_groups:
+        # Get group embeddings
+        in_group = ad.obs[group_col] == group
+        in_group_or_ref = (in_ref | in_group).tolist()
+        in_group_or_ref_indices = ad.obs.index[in_group_or_ref].tolist()
+        if use_pca:
+            X = ad.obsm["X_pca"][in_group_or_ref, :]
+        else:
+            X = ad.X[in_group_or_ref, :]
+
+        # Calculate nearest neighbors
+        nbrs = NearestNeighbors(n_neighbors=2, algorithm="ball_tree").fit(X)
+        distances, indices = nbrs.kneighbors(X)
+        indices = np.array(in_group_or_ref_indices)[indices[:, 1]]
+
+        # Record whether nearest neighbor is a member of the reference group
+        ad.obs.loc[in_group_or_ref, f"{group}_one_nn_idx"] = indices
+        ad.obs.loc[in_group_or_ref, f"{group}_one_nn_dist"] = distances[:, 1]
+        ad.obs.loc[in_group_or_ref, f"{group}_one_nn_group"] = ad.obs.loc[
+            indices, group_col
+        ].tolist()
+
+        # Make contingency table
+        cont = ad.obs[[group_col, f"{group}_one_nn_group"]].value_counts()
+        cont = (
+            cont.unstack()
+            .fillna(0)
+            .loc[[group, reference_group], [group, reference_group]]
+            .values
+        )
+
+        # Perform tests
+        group_prop = cont[0, 1] / cont[0, :].sum()
+        ref_prop = cont[1, 1] / cont[1, :].sum()
+
+        res = pd.concat(
+            [
+                res,
+                pd.DataFrame(
+                    {
+                        group_col: [group],
+                        "group_prop": [group_prop],
+                        "ref_prop": [ref_prop],
+                        "pval": [fisher_exact(cont, alternative="two-sided").pvalue],
+                    }
+                ),
+            ]
+        )
+
+    # Save results
+    res = res.set_index(group_col)
+    res["padj"] = fdrcorrection(res.pval)[1]
+    ad.uns["1NN_group_probs"] = res.iloc[:, :2].copy()
+    ad.uns["1NN_ref_prop_test"] = res
+    return ad
+
+
+def joint_1nn(ad, reference_group, group_col="Group", use_pca=False):
+    """
+    Find the group ID of each sequence's 1-nearest neighbor statistics based on the
+    sequence embeddings. Compare all groups to all other groups.
+
+    Args:
+        ad (anndata.AnnData): Anndata object containing sequence embeddings of
+            shape (n_seqs x n_vars)
+        reference_group (str): ID of group to use as reference
+        group_col (str): Name of column in .obs containing group ID
+        use_pca (bool): Whether to use PCA distances
+
+    Returns:
+        ad (anndata.AnnData): Modified anndata object containing index, distance and
+            group ID of each sequence's nearest neighbor in .obs, as well as a
+            probability table of nearest neighbor groups for each group
+        in .uns
+    """
     # Get nearest neighbor for each sequence
     if use_pca:
         nbrs = NearestNeighbors(n_neighbors=2, algorithm="ball_tree").fit(
@@ -124,7 +207,7 @@ def one_nn_stats(ad, reference_group, group_col="Group", use_pca=False):
     ad.obs.loc[:, "one_nn_idx"] = indices[:, 1]
     ad.obs.loc[:, "one_nn_dist"] = distances[:, 1]
     ad.obs.loc[:, "one_nn_group"] = (
-        ad.obs[group_col].iloc[ad.obs["one_nn_idx"].tolist()].tolist()
+        ad.obs[group_col].iloc[indices[:, 1].tolist()].tolist()
     )
 
     # Normalized count table of nearest neighbor groups
@@ -245,19 +328,27 @@ def dist_to_reference(ad, reference_group, group_col="Group", use_pca=False):
 
         if group != reference_group:
             # Add to .obs
+            ad.obs.loc[in_group, "Closest reference"] = (
+                ad[in_ref, :].obs_names[distances.argmin(1)].tolist()
+            )
             ad.obs.loc[in_group, "Distance to closest reference"] = distances.min(1)
         else:
             # If the group is the reference group, the nearest neighbor will be
             # the sequence itself. So we find the next nearest neighbor.
-            dlist = []
+            indices = []
+            dists = []
             for i, row in enumerate(distances):
                 # Drop the nearest neighbor
-                row = np.delete(row, i)
+                row[i] = np.Inf
                 # Take the new minimum
-                dlist.append(row.min())
+                dists.append(row.min())
+                indices.append(row.argmin())
 
             # Add to .obs
-            ad.obs.loc[in_group, "Distance to closest reference"] = dlist
+            ad.obs.loc[in_group, "Closest reference"] = (
+                ad[in_ref, :].obs_names[indices].tolist()
+            )
+            ad.obs.loc[in_group, "Distance to closest reference"] = dists
 
     # Mann-whitney or Kruskal-wallis test
     if len(groups) == 2:
@@ -276,10 +367,16 @@ def dist_to_reference(ad, reference_group, group_col="Group", use_pca=False):
 
 
 def embedding_analysis(
-    matrix, seqs, reference_group, group_col="Group", n_neighbors=15, use_pca=False
+    matrix,
+    seqs,
+    reference_group,
+    group_col="Group",
+    n_neighbors=15,
+    use_pca=False,
+    max_iter=1000,
 ):
     """
-    A single function to calculate all embedding distance-based metrics.
+    A single function to calculate several embedding distance-based metrics.
 
     Args:
         matrix (np.array, pd.DataFrame): A probability table or embedding matrix
@@ -307,12 +404,15 @@ def embedding_analysis(
             (.obs['Distance to closest reference'])
         Test for between group difference in Distance to the closest reference
             sequence (.uns["ref_dist_test"])
+        Performance metrics for SVMs trained to classify each group from the
+            reference (.uns["svm_performance"])
+        Predictions by SVMs trained to classify each group from the reference
+            (.obs["{group}_SVM_predicted_reference"])
     """
     from anndata import AnnData
 
     print("Creating AnnData object")
-    ad = AnnData(matrix)
-    ad.obs = seqs
+    ad = AnnData(matrix, obs=seqs)
     ad = ad[:, ad.X.sum(0) > 0]
 
     print("PCA")
@@ -325,11 +425,22 @@ def embedding_analysis(
     ad = differential_analysis(ad, reference_group, group_col)
 
     print("1-NN statistics")
-    ad = one_nn_stats(ad, reference_group, group_col, use_pca=use_pca)
+    ad = groupwise_1nn(ad, reference_group, group_col, use_pca=use_pca)
 
     print("Within-group KNN diversity")
     ad = within_group_knn_dist(ad, n_neighbors, group_col, use_pca=use_pca)
 
     print("Euclidean distance to nearest reference")
     ad = dist_to_reference(ad, reference_group, group_col, use_pca=use_pca)
+
+    print("Train groupwise classifiers")
+    ad = groupwise_svm(
+        ad,
+        reference_group,
+        group_col=group_col,
+        cv=5,
+        is_kernel=False,
+        max_iter=max_iter,
+    )
+
     return ad

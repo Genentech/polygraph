@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 
+# Constants
 RC_HASH = {
     "A": "T",
     "T": "A",
@@ -7,52 +9,85 @@ RC_HASH = {
     "G": "C",
     "N": "N",
 }
+base_to_idx = {"A": 0, "C": 1, "G": 2, "T": 3}
 
 
-def get_unique_lens(seqs):
+def make_ids(seqs):
     """
-    Given sequences, return their lengths.
+    Assign a unique index to each row of a dataframe
 
     Args:
-        seqs (list, pd.DataFrame): DNA sequences or intervals
+        seqs (pd.DataFrame): Pandas dataframe
 
     Returns:
-        (list): length of each sequence
+        seqs (pd.DataFrame): Modified database containing unique indices.
     """
-    return [len(seq) for seq in seqs]
+    seqs["SeqID"] = [f"seq_{i}" for i in range(len(seqs))]
+    return seqs.set_index("SeqID")
+
+
+def get_lens(seqs):
+    """
+    Calculate the lengths of given DNA sequences.
+
+    Args:
+        seqs (str, list, pd.DataFrame): A DNA sequence, list of sequences
+            or dataframe containing sequences in the column "Sequence".
+
+    Returns:
+        (int, list): length of each sequence
+    """
+    if isinstance(seqs, str):
+        return len(seqs)
+
+    elif isinstance(seqs, list):
+        return [len(seq) for seq in seqs]
+
+    elif isinstance(seqs, pd.DataFrame):
+        return get_lens(seqs.Sequence.tolist())
+
+    else:
+        raise TypeError("seqs must be a string, list or dataframe.")
 
 
 def check_equal_lens(seqs):
     """
-    Given sequences, check whether they are all of equal length
+    Given sequences, check whether they are all of equal length.
 
     Args:
-        seqs (list, pd.DataFrame): DNA sequences or intervals
+        seqs (list, pd.DataFrame): Either a list of DNA sequences,
+            or a dataframe containing DNA sequences in the column
+            "Sequence".
 
     Returns:
-        (bool): whether the sequences are all equal
+        (bool): whether the sequences are all equal in length.
 
     """
-    return len(set(get_unique_lens(seqs))) == 1
+    return len(set(get_lens(seqs))) == 1
 
 
 def pad_with_Ns(seqs, seq_len=None, end="both"):
     """
-    Pads a sequence with Ns at desired end to reach `seq_len`
+    Pads a sequence with Ns at the desired end until it reaches
+    `seq_len` in length.
+
     If seq_len is not provided, it is set to the length of
     the longest sequence.
 
     Args:
-        seqs (str, list): DNA sequences
-        seq_len (int): length to pad to
+        seqs (str, list, pd.DataFrame): DNA sequence, list of sequences
+            or dataframe containing sequences in the column "Sequence".
+        seq_len (int): Length upto which to pad each sequence
 
     Returns:
         (str, list): Padded sequences of length seq_len
     """
-    if seq_len is None:
-        seq_len = np.max(get_unique_lens(seqs))
-        print("Padding all sequences to length {}".format(seq_len))
 
+    # Get seq_len
+    seq_len = seq_len or np.max(get_lens(seqs))
+    # print(f"Padding all sequences to length {seq_len}")
+
+    # Pad a single sequence
     if isinstance(seqs, str):
         padding = seq_len - len(seqs)
         if padding > 0:
@@ -67,43 +102,58 @@ def pad_with_Ns(seqs, seq_len=None, end="both"):
         else:
             return seqs
 
+    # Pad multiple sequences
     elif isinstance(seqs, list):
         return [pad_with_Ns(seq, seq_len=seq_len, end=end) for seq in seqs]
 
+    elif isinstance(seqs, pd.DataFrame):
+        return pad_with_Ns(seqs.Sequence.tolist(), seq_len=seq_len, end=end)
 
-def resize(seqs, seq_len):
-    """
-    Resize DNA sequences from center.
-
-    Args:
-        strings(str, list): DNA sequences
-        seq_len (int): Desired length
-
-    Returns:
-        (str, list): Resized sequences
-    """
-    if isinstance(seqs, str):
-        if len(seqs) >= seq_len:
-            start = (len(seqs) - seq_len) // 2
-            return seqs[start : start + seq_len]
-        else:
-            return pad_with_Ns(seqs, seq_len, end="both")
     else:
-        return [resize(seq, seq_len=seq_len) for seq in seqs]
+        raise TypeError("seqs must be a string, list or dataframe.")
 
 
-def rc(seqs):
+def reverse_complement(seqs):
     """
-    Reverse complement input sequences
+    Reverse complement DNA sequences
 
     Args:
-        seqs (str, list, torch.Tensor): DNA sequences as strings, indices or one-hot
+        seqs (str, list, pd.DataFrame): seqs (str, list): A DNA sequence, list of
+            sequences or dataframe containing sequences in the column "Sequence".
 
     Returns:
-        reverse complemented sequences in the same format
+        (str, list): reverse complemented sequences
 
     """
     if isinstance(seqs, str):
         return "".join([RC_HASH[base] for base in reversed(seqs)])
+    elif isinstance(seqs, list):
+        return [reverse_complement(seq) for seq in seqs]
+    elif isinstance(seqs, pd.DataFrame):
+        return reverse_complement(seqs.Sequence.tolist())
     else:
-        return ["".join([RC_HASH[base] for base in reversed(seq)]) for seq in seqs]
+        raise TypeError("seqs must be a string, list or dataframe.")
+
+
+def integer_encode(seqs):
+    """
+    Encode DNA sequence(s) as a numpy array of integers.
+
+    Args:
+        seqs (str, list, pd.DataFrame): seqs (str, list): A DNA sequence, list of
+            sequences or dataframe containing sequences in the column "Sequence".
+
+    Returns:
+        (np.array): A 1-D or 2-D array containing the sequences encoded as integers.
+    """
+    if isinstance(seqs, str):
+        return np.array([base_to_idx[x] for x in seqs])
+
+    elif isinstance(seqs, list):
+        return np.array([[base_to_idx[x] for x in seq] for seq in seqs])
+
+    elif isinstance(seqs, pd.DataFrame):
+        return integer_encode(seqs.Sequence.tolist())
+
+    else:
+        raise TypeError("Input should be a string, list of strings, or dataframe")
