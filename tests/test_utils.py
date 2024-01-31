@@ -1,14 +1,14 @@
 import numpy as np
 
-from polygraph.utils import pad_with_Ns, rc
+from polygraph.utils import pad_with_Ns, reverse_complement
 
 
-def test_rc():
+def test_reverse_complement():
     """
     Test reverse complement
     """
-    assert rc("AGCA") == "TGCT"
-    assert rc("NNNN") == "NNNN"
+    assert reverse_complement("AGCA") == "TGCT"
+    assert reverse_complement("NNNN") == "NNNN"
 
 
 def test_pad_with_Ns():

@@ -4,7 +4,6 @@ from polygraph.sequence import (
     gc,
     kmer_frequencies,
     kmer_positions,
-    reverse_complement,
     unique_kmers,
 )
 
@@ -36,11 +35,3 @@ def test_unique_kmers():
 def test_kmer_positions():
     seqs = "AGCTAAA"
     assert np.all(kmer_positions(seqs, "AA") == np.array([4, 5]))
-
-
-def test_reverse_complement():
-    """
-    Test reverse complement
-    """
-    assert reverse_complement("AGCA") == "TGCT"
-    assert reverse_complement("NNNN") == "NNNN"
