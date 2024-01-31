@@ -13,7 +13,7 @@ def batch(sequences, batch_size):
     Pad sequences to a constant length and split them into batches to pass to a model
 
     Args:
-        sequences (list): List of sequences
+        sequences (list): List of DNA sequences
         batch_size (int): Batch size
 
     Returns:
@@ -21,6 +21,7 @@ def batch(sequences, batch_size):
     """
     # Pad sequences to the same length
     padded_seqs = pad_with_Ns(sequences)
+    batch_size = np.min([batch_size, len(sequences)])
 
     # Yield each batch
     for start in range(0, len(sequences), batch_size):
@@ -31,6 +32,9 @@ def batch(sequences, batch_size):
 def load_enformer():
     """
     Load pre-trained enformer model
+
+    Returns:
+        (Enformer): Pretrained model
     """
     return Enformer.from_pretrained(
         "EleutherAI/enformer-official-rough", target_length=-1
@@ -46,7 +50,7 @@ def enformer_embed(sequences, model):
         model (Enformer): pre-trained or fine-tuned enformer model
 
     Returns:
-        np.array of shape (n_seqs x )
+        np.array of shape (n_seqs x 3072)
     """
     return model(sequences, return_only_embeddings=True).mean(1).cpu().detach().numpy()
 
@@ -59,13 +63,17 @@ def load_nucleotide_transformer(
 
     Args:
         model (str): Name of pretrained model to download
+
+    Returns:
+        model (EsmForMaskedLM): Pre-trained model
+        tokenizer (): Class to convert sequences to tokens
     """
     tokenizer = AutoTokenizer.from_pretrained(model)
     model = AutoModelForMaskedLM.from_pretrained(model)
     return model, tokenizer
 
 
-def nucleotide_transformer_embed(sequences, model, tokenizer):
+def nucleotide_transformer_embed(seqs, model, tokenizer):
     """
     Embed a batch of sequences using the pre-trained nucleotide transformer model
 
@@ -74,9 +82,9 @@ def nucleotide_transformer_embed(sequences, model, tokenizer):
         model: pre-trained nucleotide transformer model
 
     Returns:
-        np.array of shape (n_seqs x )
+        np.array of shape (n_seqs x n_features)
     """
-    tokens = tokenizer.batch_encode_plus(sequences, return_tensors="pt", padding=True)[
+    tokens = tokenizer.batch_encode_plus(seqs, return_tensors="pt", padding=True)[
         "input_ids"
     ]
     torch_outs = model(
@@ -88,90 +96,158 @@ def nucleotide_transformer_embed(sequences, model, tokenizer):
     return torch_outs["hidden_states"][-1].mean(1).cpu().detach().numpy()
 
 
-def sequential_embed(sequences, model, drop_last_layers, swapaxes=False):
+def sequential_embed(seqs, model, drop_last_layers, swapaxes=False, device="cpu"):
     """
     Embed a batch of sequences using a torch.nn.Sequential model
 
     Args:
-        sequences (list): List of sequences
+        seqs (list): List of sequences
         model (nn.Sequential): trained model
-        drop_last_layers (int): Number of final layers to drop to get embeddings
+        drop_last_layers (int): Number of terminal layers to drop to get embeddings
 
     Returns:
         np.array of shape (n_seqs x n_features)
     """
-    x = str_to_one_hot(sequences).swapaxes(1, 2)
+    x = str_to_one_hot(seqs).swapaxes(1, 2).to(torch.device(device))
     x = model[:-drop_last_layers](x)
     if swapaxes:
         x = x.swapaxes(1, 2)
     return x.mean(-1).cpu().squeeze().detach().numpy()
 
 
-def _get_embeddings(model, sequences, drop_last_layers=1):
+def _get_embeddings(seqs, model, drop_last_layers=1, device="cpu", swapaxes=False):
     """
     Get model embeddings for a batch of sequences
 
     Args:
-        sequences (list): List of sequences
+        seqs (list): List of sequences
         model (nn.Sequential): trained model
+        drop_last_layers (int): Number of terminal layers to drop to get embeddings
 
     Returns:
         np.array of shape (n_seqs x n_features)
     """
     if isinstance(model, Enformer):
-        return enformer_embed(sequences, model)
+        return enformer_embed(seqs, model)
     elif isinstance(model, EsmForMaskedLM):
-        return nucleotide_transformer_embed(sequences, model)
+        return nucleotide_transformer_embed(seqs, model)
     elif isinstance(model, nn.Sequential):
-        return sequential_embed(sequences, model, drop_last_layers)
+        return sequential_embed(
+            seqs,
+            model,
+            drop_last_layers=drop_last_layers,
+            swapaxes=swapaxes,
+            device=device,
+        )
     else:
         raise TypeError(
             "Embeddings cannot be automatically returned for this model type."
         )
 
 
-def get_embeddings(seq_df, model, batch_size, drop_last_layers=1):
+def get_embeddings(
+    seqs, model, batch_size, drop_last_layers=1, device="cpu", swapaxes=False
+):
     """
     Get model embeddings for all sequences in a dataframe
+
+    Args:
+        seqs (list, pd.DataFrame): List of sequences or dataframe
+            containing sequences in the column "Sequence".
+        model (nn.Sequential): trained model
+        batch_size (int): Batch size for inference
+        drop_last_layers (int): Number of terminal layers to drop to get embeddings
+        device (str, int): ID of GPU to perform inference.
+        swapaxes (bool): If true, batches will be of shape (N, 4, L).
+            Otherwise, shape will be (N, L, 4).
+
+    Returns:
+        np.array of shape (n_seqs x n_features)
     """
-    embeddings = [
-        _get_embeddings(model, x, drop_last_layers)
-        for x in batch(seq_df.Sequence.tolist(), batch_size)
-    ]
-    return pd.DataFrame(np.vstack(embeddings), index=seq_df.index)
+    if isinstance(seqs, list):
+        orig_device = next(model.parameters()).device
+        model = model.to(torch.device(device))
+        embeddings = []
+
+        # Batch the sequences
+        for x in batch(seqs, batch_size):
+            embeddings.append(
+                _get_embeddings(
+                    x,
+                    model,
+                    drop_last_layers=drop_last_layers,
+                    device=device,
+                    swapaxes=swapaxes,
+                )
+            )
+
+        model = model.to(orig_device)
+        return np.vstack(embeddings)
+
+    elif isinstance(seqs, pd.DataFrame):
+        return pd.DataFrame(
+            get_embeddings(
+                seqs.Sequence.tolist(),
+                model,
+                batch_size=batch_size,
+                drop_last_layers=drop_last_layers,
+                device=device,
+                swapaxes=swapaxes,
+            ),
+            index=seqs.index,
+        )
+
+    else:
+        raise TypeError("seqs must be a list or dataframe.")
 
 
-def cell_type_specificity(on_target, off_target):
+def cell_type_specificity(seqs, on_target_col, off_target_cols):
     """
     Calculate cell type specificity from predicted or measured output
+
+    Args:
+        seqs (pd.DataFrame): Dataframe containing sequence predictions
+        on_target (str): Column containing predictions in on-target cell type
+        off_target (list): Columns containing predictions in off-target cell types.
+
+    Returns:
+        (pd.DataFrame): seqs with additional columns mingap, maxgap and meangap,
+            reporting 3 measures of cell type specificity for each sequence.
     """
-    # Stack off-target values
-    off_target = np.vstack(off_target)
-
-    # Multiply the on-target values to get the same shape
-    on_target = np.tile(on_target, (off_target.shape[0], 1))
-
     # Get the log2 fold change between on-target values and each off-target cell type
-    lfc = np.log2(on_target / off_target)
+    lfc = np.log2(seqs[[on_target_col]].values / seqs[off_target_cols].values)
 
     # Calculate gap statistics
-    mingap = lfc.min(0)
-    maxgap = lfc.max(0)
-    meangap = lfc.mean(0)
-    return pd.DataFrame({"mingap": mingap, "maxgap": maxgap, "meangap": meangap})
+    seqs["mingap"] = lfc.min(1)
+    seqs["maxgap"] = lfc.max(1)
+    seqs["meangap"] = lfc.mean(1)
+    return seqs
 
 
-def predict(model, seq_df, batch_size, device="cpu"):
+def predict(seqs, model, batch_size, device="cpu"):
     """
-    Predict using a sequence-to-function model
+    Predict sequence properties using a sequence-to-function model.
+
+    Args:
+        seqs (list, pd.DataFrame): List of sequences or dataframe
+            containing sequences in the column "Sequence".
+        model (nn.Sequential): trained model
+        batch_size (int): Batch size for inference
+        device (str, int): ID of GPU to perform inference.
+
+    Returns:
+        (np.array): Array of shape (n_seqs x n_outputs)
     """
     preds = []
 
     # Move model to device
     model = model.to(torch.device(device))
 
+    if isinstance(seqs, pd.DataFrame):
+        seqs = seqs.Sequence.tolist()
+
     # Batch the sequences
-    for x in batch(seq_df.Sequence.tolist(), batch_size):
+    for x in batch(seqs, batch_size):
         # One-hot encode the sequence
         x = str_to_one_hot(x).swapaxes(1, 2)
 
@@ -179,6 +255,48 @@ def predict(model, seq_df, batch_size, device="cpu"):
         x = x.to(torch.device(device))
 
         # Predict
-        preds.append(model(x).cpu().detach().squeeze().numpy())
+        preds.append(model(x).cpu().detach().numpy())  # N, T
 
-    return np.vstack(preds)
+    return np.vstack(preds).squeeze()
+
+
+def ism_score(model, seqs, batch_size, device="cpu", task=None):
+    """
+    Get base-level importance scores for given sequence(s) using ISM
+
+    Args:
+        seqs (list, pd.DataFrame): List of sequences or dataframe
+            containing sequences in the column "Sequence".
+        model (nn.Sequential): trained model
+        batch_size (int): Batch size for inference
+        device (str, int): ID of GPU to perform inference.
+
+    Returns:
+        (pd.DataFrame): DataFrame of shape (n_seqs x n_outputs)
+    """
+    from polygraph.sequence import ISM
+    from polygraph.utils import check_equal_lens
+
+    assert check_equal_lens(seqs)
+
+    # Mutate sequences
+    ism = ISM(seqs)  # N x L x 4
+
+    # Make predictions on mutated sequences
+    preds = predict(seqs=ism, model=model, batch_size=batch_size, device=device)
+    assert preds.ndim < 3
+
+    # Select relevant task/cell type, or average predictions
+    if task is None:
+        if preds.ndim == 2:
+            preds = preds.mean(1)
+    else:
+        preds = preds[:, task]
+
+    # Reshape predictions : N, L, 4
+    preds = preds.reshape(len(seqs), len(ism) // (len(seqs) * 4), 4)
+
+    # Compute base-level importance score
+    preds = np.log2(preds / preds.mean(-1, keepdims=True))
+    preds = np.abs(preds).max(-1)
+    return preds

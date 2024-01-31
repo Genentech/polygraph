@@ -8,16 +8,13 @@ from statsmodels.stats.multitest import fdrcorrection
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney
 
 
-def scan(
-    seqs, meme_file, sequence_col="Sequence", group_col="Group", pthresh=1e-3, rc=True
-):
+def scan(seqs, meme_file, group_col="Group", pthresh=1e-3, rc=True):
     """
-    Scan a DNA sequence using motifs from a MEME file
+    Scan a DNA sequence using motifs from a MEME file.
 
     Args:
         seqs (str): Dataframe containing DNA sequences
         meme_file (str): Path to MEME file
-        sequence_col (str): Column containing sequences
         group_col (str): Column containing group IDs
         pthresh (float): p-value cutoff for binding sites
         rc (bool): Whether to scan the sequence reverse complement as well
@@ -38,7 +35,7 @@ def scan(
     # Format sequences
     sequences = [
         Sequence(seq, name=id.encode())
-        for seq, id in zip(seqs[sequence_col].tolist(), seqs["SeqID"].tolist())
+        for seq, id in zip(seqs["Sequence"].tolist(), seqs.index.tolist())
     ]
 
     # Setup FIMO
@@ -57,10 +54,10 @@ def scan(
             out["end"].append(m.stop)
             out["strand"].append(m.strand)
 
-    return pd.DataFrame(out).merge(seqs[["SeqID", group_col]], on="SeqID")
+    return pd.DataFrame(out).merge(seqs[[group_col]], left_on="SeqID", right_index=True)
 
 
-def motif_frequencies(sites, normalize=False, seqs=None, sequence_col="Sequence"):
+def motif_frequencies(sites, normalize=False, seqs=None):
     """
     Count frequency of occurrence of motifs in a list of sequences
 
@@ -70,18 +67,19 @@ def motif_frequencies(sites, normalize=False, seqs=None, sequence_col="Sequence"
             to correct for sequence length
         seqs (pd.DataFrame): Pandas dataframe containing DNA sequences.
             Needed if normalize=True.
-        sequence_col (str): Column in seqs containing DNA sequences.
 
     Returns:
         cts (pd.DataFrame): Count matrix with rows = sequences and columns = motifs
     """
+    motifs = sites.MotifID.unique()
+    cts = np.zeros((len(seqs), len(motifs)))
     cts = sites[["MotifID", "SeqID"]].value_counts().reset_index(name="count")
-    cts = cts.pivot_table(
-        index="SeqID", columns="MotifID", values="count", fill_value=0
-    )
+    cts = cts.pivot_table(index="SeqID", columns="MotifID", values="count")
+    cts = cts.merge(seqs[[]], left_index=True, right_index=True, how="right").fillna(0)
+
     if normalize:
         assert seqs is not None, "seqs must be provided for normalization"
-        seq_lens = seqs.set_index("SeqID")[sequence_col].apply(len)[cts.index]
+        seq_lens = seqs["Sequence"].apply(len)
         cts = cts.divide(seq_lens.tolist(), axis=0)
     return cts
 
@@ -169,21 +167,21 @@ def motif_combinations(
     print("Listing motif combinations")
 
     # Get the complete set of motifs present in each sequence
-    motif_combinations = counts.apply(
-        lambda row: set(counts.columns[np.where(row > 0)[0]]), axis=1
-    ).reset_index()
-    motif_combinations.columns = ["SeqID", "motifs"]
+    motif_combinations = pd.DataFrame(
+        counts.apply(lambda row: set(counts.columns[np.where(row > 0)[0]]), axis=1)
+    )
+    motif_combinations.columns = ["motifs"]
     motif_combinations = motif_combinations.merge(
-        seqs[["SeqID", group_col]], on="SeqID"
+        seqs[[group_col]], left_index=True, right_index=True
     )
 
     # Get pairwise combinations present in each sequence
     motif_combinations["combination"] = motif_combinations.motifs.apply(
         lambda x: list(itertools.combinations(x, 2))
     )
-    motif_combinations = motif_combinations[
-        ["SeqID", "combination", group_col]
-    ].explode("combination")
+    motif_combinations = motif_combinations[["combination", group_col]].explode(
+        "combination"
+    )
 
     print("Making count matrix")
     # Count the number of sequences in which each motif combination is present
@@ -218,14 +216,14 @@ def motif_combinations(
         cts = cts[cts.combination.isin(sel_comb)]
 
     print("Significance testing")
-    df = seqs[["SeqID", group_col]].copy()
+    df = seqs[[group_col]].copy()
     res = pd.DataFrame()
 
     for comb in cts.combination.unique():
-        seqs_with_comb = motif_combinations.SeqID[
+        seqs_with_comb = motif_combinations[
             motif_combinations.combination == comb
-        ].tolist()
-        df["has_comb"] = df.SeqID.isin(seqs_with_comb)
+        ].index.tolist()
+        df["has_comb"] = df.index.isin(seqs_with_comb)
         curr_res = groupwise_fishers(
             df,
             reference_group=reference_group,
@@ -240,3 +238,24 @@ def motif_combinations(
     res["padj"] = fdrcorrection(res.pval)[1]
 
     return res.reset_index(drop=True)
+
+
+def score_sites(sites, seqs, scores):
+    """
+    Calculate the average score of each motif site given base-level importance scores.
+
+    Args:
+        sites (pd.DataFrame): Dataframe containing site positions
+        seqs (pd.DataFrame): Dataframe containing sequences
+        scores (np.array): Numpy array of shape (sequences x length)
+
+    Returns
+        sites (pd.DataFrame): 'sites' dataframe with an additional columns 'score'
+    """
+    sites["score"] = sites.apply(
+        lambda row: scores[seqs.index == row.SeqID, row.start : row.end].mean()
+        if row.strand == "+"
+        else scores[seqs.index == row.SeqID, row.end : row.start].mean(),
+        axis=1,
+    )
+    return sites

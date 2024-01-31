@@ -3,6 +3,7 @@ import os
 import sys
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
@@ -14,11 +15,11 @@ def load_hyenadna(hyena_path, ckpt_dir=".", model="hyenadna-small-32k-seqlen"):
 
     Args:
         hyena_path (str): Path to the cloned hyenaDNA repo. The repo must be cloned with
-        the recurse-submodules flag. See installation instructions at
-        https://github.com/HazyResearch/hyena-dna/tree/main.
+            the recurse-submodules flag. See installation instructions at
+            https://github.com/HazyResearch/hyena-dna/tree/main.
         ckpt_dir (str): Path to directory in which to download the model
         model (str): Name of the foundation model to download. See
-        https://github.com/HazyResearch/hyena-dna/tree/main for options.
+            https://github.com/HazyResearch/hyena-dna/tree/main for options.
 
     Returns:
         model (ConvLMHeadModel): Pretrained HyenaDNA model
@@ -76,7 +77,7 @@ class CharDataset(Dataset):
         A dataset class to produce sequences for hyenaDNA.
 
         Args:
-            seqs (list): List of sequences.
+            seqs (list): List of DNA sequences.
         """
         self.seqs = seqs
 
@@ -100,33 +101,51 @@ class CharDataset(Dataset):
 
 
 def compute_likelihood(
-    seqs, model, batch_size=32, num_workers=1, device="cpu", sequence_col="Sequence"
+    seqs,
+    model,
+    batch_size=32,
+    num_workers=1,
+    device="cpu",
 ):
     """
-    Function to compute log-likelihood of each sequence in the given list using the
-    hyenaDNA model pretrained on the human genome.
+    Function to compute the log-likelihood of each sequence in the
+    given list using the hyenaDNA model pretrained on the human genome.
 
     Args:
-        seqs (pd.DataFrame): Dataframe containing DNA sequences
+        seqs (str, list, pd.DataFrame): DNA sequence, list of DNA sequences
+            or a dataframe containing sequences in the column "Sequence".
         model (ConvLMHead): HyenaDNA model
         batch_size (int): Batch size for inference
         num_workers (int): Number of workers for inference dataloader
         device (int, str): Device ID for inference
-        sequence_col (str): Column containing sequences
 
-    Returns
+    Returns:
+        LL (list): Log-likelihoods for each sequence
     """
-    ds = CharDataset(seqs[sequence_col].tolist())
+    # Make dataset
+    if isinstance(seqs, str):
+        ds = CharDataset([seqs])
+    elif isinstance(seqs, list):
+        ds = CharDataset(seqs)
+    elif isinstance(seqs, pd.DataFrame):
+        ds = CharDataset(seqs.Sequence.tolist())
+    else:
+        raise TypeError("seqs must be a string, list or dataframe.")
+
+    # Make dataloader
     dl = DataLoader(ds, shuffle=False, batch_size=batch_size, num_workers=num_workers)
+
+    # Transfer model to GPU
     model = model.to(torch.device(device))
     LL = []
 
+    # Calculate likelihoods for each batch
     for batch in iter(dl):
-        batch = batch.to(torch.device(device))
-        logits = model(batch)[0][0]
-        probs = F.softmax(logits, dim=2).cpu().detach()
-        truth = batch[:, 1:]
-        probs = probs[:, :-1, :]
+        batch = batch.to(torch.device(device))  # N, L+1
+        logits = model(batch)[0][0]  # N, L+1, 16
+        probs = F.softmax(logits, dim=2).cpu().detach()  # N, L+1, 16
+        truth = batch[:, 1:]  # N, L
+        probs = probs[:, :-1, :]  # N, L, 16
         LL.extend(
             [
                 np.sum([pr[pos, tru[pos]].log().item() for pos in range(pr.shape[0])])
