@@ -1,11 +1,6 @@
 import numpy as np
 
-from polygraph.sequence import (
-    gc,
-    kmer_frequencies,
-    kmer_positions,
-    unique_kmers,
-)
+from polygraph.sequence import gc, kmer_frequencies, kmer_positions, unique_kmers
 
 
 def test_gc():
