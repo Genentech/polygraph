@@ -1,6 +1,7 @@
 Biopython
 editdistance
 enformer_pytorch
+fastsk
 importlib-metadata
 myst-parser[linkify]
 numpy

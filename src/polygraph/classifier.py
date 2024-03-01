@@ -66,7 +66,7 @@ def groupwise_svm(
         ).codes
 
         # Train SVM
-        svm = LinearSVC(C=2, max_iter=max_iter)
+        svm = LinearSVC(C=2, max_iter=max_iter, dual=True)
         clf = CalibratedClassifierCV(svm, cv=cv).fit(Xtrain, Ytrain)
 
         # Get predictions
