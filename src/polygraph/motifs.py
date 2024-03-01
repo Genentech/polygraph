@@ -178,26 +178,35 @@ def get_motif_pairs(sites):
 
 
 def _filter_motif_pairs(
-    motif_pairs, seqs, group_col="Group", min_group_freq=0, min_group_prop=0
+    motif_pairs,
+    seqs,
+    reference_group=None,
+    group_col="Group",
+    min_prop_cutoff=0,
+    max_prop_cutoff=0,
+    ref_prop_cutoff=0,
 ):
     # Count occurrence of motif pairs in each group
     cts = motif_pairs[["MotifID", group_col]].reset_index().drop_duplicates()
-    cts = cts[["MotifID", "Group"]].value_counts().reset_index(name="count")
-
-    # Filter rare pairs by frequency
-    if min_group_freq > 0:
-        pair_max = cts.groupby("MotifID")["count"].max()
-        sel_pairs = set(pair_max[pair_max > min_group_freq].index)
-        print(f"Selected {len(sel_pairs)} pairs based on maximum in-group frequency")
-        motif_pairs = motif_pairs[motif_pairs.MotifID.isin(sel_pairs)]
+    cts = cts[["MotifID", group_col]].value_counts().reset_index(name="count")
+    cts["group_total"] = seqs[group_col].value_counts()[cts[group_col]].tolist()
+    cts["group_prop"] = cts["count"] / cts.group_total
+    cts = cts.pivot_table(
+        index="MotifID", columns=group_col, values="group_prop"
+    ).fillna(0)
 
     # Filter rare pairs by proportion
-    if min_group_prop > 0:
-        cts["group_total"] = seqs.Group.value_counts()[cts.Group].tolist()
-        cts["group_prop"] = cts["count"] / cts.group_total
-        sel_pairs = set(cts.MotifID[cts.group_prop > min_group_prop])
-        print(f"Selected {len(sel_pairs)} pairs based on maximum in-group proportion")
-        motif_pairs = motif_pairs[motif_pairs.MotifID.isin(sel_pairs)]
+    sel_pairs = set(
+        cts.index[(cts.max(1) >= max_prop_cutoff) & (cts.min(1) >= min_prop_cutoff)]
+    )
+    if ref_prop_cutoff > 0:
+        assert reference_group is not None
+        sel_pairs = sel_pairs.intersection(
+            cts.index[cts[reference_group] >= ref_prop_cutoff]
+        )
+
+    print(f"Selected {len(sel_pairs)} pairs based on in-group proportion")
+    motif_pairs = motif_pairs[motif_pairs.MotifID.isin(sel_pairs)]
 
     return motif_pairs.copy()
 
@@ -207,8 +216,9 @@ def motif_pair_differential_abundance(
     seqs,
     reference_group,
     group_col="Group",
-    min_group_freq=0,
-    min_group_prop=0,
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
 ):
     """
     Compare the rate of occurence of pairwise combinations of motifs between groups
@@ -219,10 +229,10 @@ def motif_pair_differential_abundance(
         seqs (pd.DataFrame): Pandas dataframe containing sequences
         reference_group (str): ID of group to use as reference
         group_col (str): Name of column in `seqs` containing group IDs
-        min_group_freq (int): Limit to combinations with this number of occurences in
+        max_prop_cutoff (int): Limit to combinations with this proportion in
             at least one group.
-        min_group_prop (float): Limit to combinations with this proportion of occurences
-            in at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
 
     Returns:
         res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
@@ -233,13 +243,15 @@ def motif_pair_differential_abundance(
         seqs[[group_col]], left_index=True, right_index=True
     )
 
-    if (min_group_freq > 0) or (min_group_prop > 0):
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
         motif_pairs = _filter_motif_pairs(
             motif_pairs,
             seqs,
+            reference_group=reference_group,
             group_col=group_col,
-            min_group_freq=min_group_freq,
-            min_group_prop=min_group_prop,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
         )
 
     df = seqs[[group_col]].copy()
@@ -267,8 +279,9 @@ def motif_pair_differential_orientation(
     seqs,
     reference_group,
     group_col="Group",
-    min_group_freq=0,
-    min_group_prop=0,
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
 ):
     """
     Compare the mutual orientation of all motif pairs between groups.
@@ -279,10 +292,10 @@ def motif_pair_differential_orientation(
         seqs (pd.DataFrame): Pandas dataframe containing sequences
         reference_group (str): ID of group to use as reference
         group_col (str): Name of column in `seqs` containing group IDs
-        min_group_freq (int): Limit to combinations with this number of occurences in
+        max_prop_cutoff (int): Limit to combinations with this proportion in
             at least one group.
-        min_group_prop (float): Limit to combinations with this proportion of occurences
-            in at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
 
     Returns:
         res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
@@ -295,18 +308,20 @@ def motif_pair_differential_orientation(
         seqs[[group_col]], left_index=True, right_index=True
     )
 
-    if (min_group_freq > 0) or (min_group_prop > 0):
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
         motif_pairs = _filter_motif_pairs(
             motif_pairs,
             seqs,
+            reference_group=reference_group,
             group_col=group_col,
-            min_group_freq=min_group_freq,
-            min_group_prop=min_group_prop,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
         )
 
     for pair in motif_pairs.MotifID.unique():
         curr_res = groupwise_fishers(
-            motif_pairs,
+            motif_pairs[motif_pairs.MotifID == pair],
             reference_group=reference_group,
             val_col="orientation",
             reference_val="same",
@@ -326,8 +341,9 @@ def motif_pair_differential_distance(
     seqs,
     reference_group,
     group_col="Group",
-    min_group_freq=0,
-    min_group_prop=0,
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
 ):
     """
     Compare the distance between all motif pairs across groups.
@@ -338,10 +354,10 @@ def motif_pair_differential_distance(
         seqs (pd.DataFrame): Pandas dataframe containing sequences
         reference_group (str): ID of group to use as reference
         group_col (str): Name of column in `seqs` containing group IDs
-        min_group_freq (int): Limit to combinations with this number of occurences in
+        max_prop_cutoff (int): Limit to combinations with this proportion in
             at least one group.
-        min_group_prop (float): Limit to combinations with this proportion of occurences
-            in at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
 
     Returns:
         res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
@@ -352,18 +368,20 @@ def motif_pair_differential_distance(
         seqs[[group_col]], left_index=True, right_index=True
     )
 
-    if (min_group_freq > 0) or (min_group_prop > 0):
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
         motif_pairs = _filter_motif_pairs(
             motif_pairs,
             seqs,
+            reference_group=reference_group,
             group_col=group_col,
-            min_group_freq=min_group_freq,
-            min_group_prop=min_group_prop,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
         )
 
     for pair in motif_pairs.MotifID.unique():
         curr_res = groupwise_mann_whitney(
-            motif_pairs,
+            motif_pairs[motif_pairs.MotifID == pair],
             reference_group=reference_group,
             val_col="distance",
             group_col=group_col,

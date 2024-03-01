@@ -1,4 +1,5 @@
 import anndata
+import numpy as np
 import pandas as pd
 from scikit_posthocs import posthoc_dunn
 from scipy.stats import fisher_exact, kruskal, mannwhitneyu
@@ -30,37 +31,44 @@ def groupwise_fishers(
         # List groups
         groups = data[group_col].unique()
 
-        # List nonreference groups
-        nonreference_groups = groups[groups != reference_group]
-
-        # Select group and value columns
-        cont = data[[group_col, val_col]].copy()
-
-        # If desired, binarize the values
-        if reference_val is not None:
-            cont[val_col] = cont[val_col] == reference_val
-
         # Make all-group contingency table
-        cont = cont.value_counts().unstack().fillna(0).astype(int)
+        cont = pd.DataFrame(
+            np.zeros((len(groups), 2)),
+            index=groups,
+            columns=[True, False],
+        )
+        if reference_val is None:
+            reference_val = True
+        for group in groups:
+            cont.loc[group, True] = sum(
+                (data[group_col] == group) & (data[val_col] == reference_val)
+            )
+            cont.loc[group, False] = sum(
+                (data[group_col] == group) & (data[val_col] != reference_val)
+            )
+        cont = cont.astype(np.int64)
 
         # Compute proportion in the reference group
-        ref_prop = (
-            cont.loc[reference_group, :].iloc[1] / cont.loc[reference_group, :].sum()
-        )
+        ref_prop = cont.loc[reference_group][True] / cont.loc[reference_group].sum()
 
         # Perform Fisher's exact test for each group vs. the reference group
         res = pd.DataFrame()
 
+        # List nonreference groups
+        nonreference_groups = groups[groups != reference_group]
         for group in nonreference_groups:
             # Subset contingency table
-            group_cont = cont.loc[[group, reference_group], :].values
-            group_prop = group_cont[0, 1] / group_cont[0, :].sum()
+            group_cont = cont.loc[[group, reference_group], :]
+            group_prop = group_cont.loc[group][True] / group_cont.loc[group].sum()
             group_res = pd.DataFrame(
                 {
                     group_col: [group],
                     "group_prop": [group_prop],
                     "ref_prop": [ref_prop],
-                    "pval": [fisher_exact(group_cont, alternative="two-sided").pvalue],
+                    "log2FC": [np.log2(group_prop / ref_prop)],
+                    "pval": [
+                        fisher_exact(group_cont.values, alternative="two-sided").pvalue
+                    ],
                 }
             )
             res = pd.concat([res, group_res])
@@ -99,20 +107,30 @@ def groupwise_mann_whitney(data, val_col, reference_group, group_col="Group"):
         # List nonreference groups
         nonreference_groups = groups[groups != reference_group]
 
+        # Get reference values
+        ref_data = data.loc[data[group_col] == reference_group, val_col]
+        ref_mean = ref_data.mean()
+
         # Perform tests
-        res = pd.DataFrame(
-            {
-                group_col: nonreference_groups,
-                "pval": [
-                    mannwhitneyu(
-                        data.loc[data[group_col] == group, val_col],
-                        data.loc[data[group_col] == reference_group, val_col],
-                        alternative="two-sided",
-                    ).pvalue
-                    for group in nonreference_groups
-                ],
-            }
-        )
+        res = pd.DataFrame()
+        for group in nonreference_groups:
+            # Subset contingency table
+            group_data = data.loc[data[group_col] == group, val_col]
+            group_mean = group_data.mean()
+            group_res = pd.DataFrame(
+                {
+                    group_col: [group],
+                    "group_mean": [group_mean],
+                    "ref_mean": [ref_mean],
+                    "log2FC": [np.log2(group_mean / ref_mean)],
+                    "pval": [
+                        mannwhitneyu(
+                            group_data, ref_data, alternative="two-sided"
+                        ).pvalue
+                    ],
+                }
+            )
+            res = pd.concat([res, group_res])
 
         if len(res) > 1:
             # FDR corrections
