@@ -20,7 +20,7 @@ def scan(seqs, meme_file, group_col="Group", pthresh=1e-3, rc=True):
         rc (bool): Whether to scan the sequence reverse complement as well
 
     Returns:
-        pd.DataFrame containing columns 'Matrix_id', 'seq_id', 'start', 'end', 'strand'.
+        pd.DataFrame containing columns 'MotifID', 'SeqID', 'start', 'end', 'strand'.
     """
     from collections import defaultdict
 
@@ -137,101 +137,256 @@ def nmf(counts, seqs, reference_group, group_col="Group", n_components=10):
     return W, H, res
 
 
-def motif_combinations(
-    counts,
+def get_motif_pairs(sites):
+    """
+    List the pairs of motifs present in each sequence.
+
+    Args:
+        sites (pd.DataFrame): Pandas dataframe containing FIMO output.
+
+    Returns:
+        pairs (pd.DataFrame): Dataframe containing all motif pairs in each
+        sequence with their orientation and distance.
+    """
+    # Get midpoint of motif
+    sites["mid"] = sites["start"] + ((sites["end"] - sites["start"]) / 2)
+
+    # List the motif, strand and position for each site
+    df = sites[["SeqID"]].copy()
+    df["data"] = sites[["MotifID", "strand", "mid"]].apply(
+        lambda row: row.tolist(), axis=1
+    )
+
+    # Get all pairs of sites present in each sequence
+    pairs = pd.DataFrame(
+        df.groupby("SeqID")["data"].apply(lambda x: list(itertools.combinations(x, 2))),
+        columns=["data"],
+    )
+    pairs = pairs.explode("data")
+
+    # Get the orientation and distance for each pair of motifs
+    pairs = pd.DataFrame(
+        pairs.data.apply(lambda x: list(zip(*x))).tolist(),
+        index=pairs.index,
+        columns=["MotifID", "strand", "pos"],
+    )
+    pairs["orientation"] = pairs.strand.apply(
+        lambda x: "same" if len(set(x)) == 1 else "opposite"
+    )
+    pairs["distance"] = pairs.pos.apply(lambda x: np.abs(x[1] - x[0]))
+    return pairs[["MotifID", "orientation", "distance"]]
+
+
+def _filter_motif_pairs(
+    motif_pairs,
+    seqs,
+    reference_group=None,
+    group_col="Group",
+    min_prop_cutoff=0,
+    max_prop_cutoff=0,
+    ref_prop_cutoff=0,
+):
+    # Count occurrence of motif pairs in each group
+    cts = motif_pairs[["MotifID", group_col]].reset_index().drop_duplicates()
+    cts = cts[["MotifID", group_col]].value_counts().reset_index(name="count")
+    cts["group_total"] = seqs[group_col].value_counts()[cts[group_col]].tolist()
+    cts["group_prop"] = cts["count"] / cts.group_total
+    cts = cts.pivot_table(
+        index="MotifID", columns=group_col, values="group_prop"
+    ).fillna(0)
+
+    # Filter rare pairs by proportion
+    sel_pairs = set(
+        cts.index[(cts.max(1) >= max_prop_cutoff) & (cts.min(1) >= min_prop_cutoff)]
+    )
+    if ref_prop_cutoff > 0:
+        assert reference_group is not None
+        sel_pairs = sel_pairs.intersection(
+            cts.index[cts[reference_group] >= ref_prop_cutoff]
+        )
+
+    print(f"Selected {len(sel_pairs)} pairs based on in-group proportion")
+    motif_pairs = motif_pairs[motif_pairs.MotifID.isin(sel_pairs)]
+
+    return motif_pairs.copy()
+
+
+def motif_pair_differential_abundance(
+    motif_pairs,
     seqs,
     reference_group,
     group_col="Group",
-    min_group_freq=10,
-    min_group_prop=None,
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
 ):
     """
-    Count occurences of pairwise combinations of motifs and compare between groups
+    Compare the rate of occurence of pairwise combinations of motifs between groups
 
     Args:
-        counts (pd.DataFrame): Pandas dataframe containing the motif count matrix.
-            Rows should be sequences and columns should be motifs.
+        motif_pairs (pd.DataFrame): Pandas dataframe containing the ouptut of
+            get_motif_pairs.
         seqs (pd.DataFrame): Pandas dataframe containing sequences
         reference_group (str): ID of group to use as reference
         group_col (str): Name of column in `seqs` containing group IDs
-        min_group_freq (int): Limit to combinations with this number of occurences in
+        max_prop_cutoff (int): Limit to combinations with this proportion in
             at least one group.
-        min_group_prop (float): Limit to combinations with this proportion of occurences
-            in at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
 
     Returns:
         res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
             testing results for the occurrence of pairwise combinations between groups
     """
-
-    print("Listing motif combinations")
-
-    # Get the complete set of motifs present in each sequence
-    motif_combinations = pd.DataFrame(
-        counts.apply(lambda row: set(counts.columns[np.where(row > 0)[0]]), axis=1)
-    )
-    motif_combinations.columns = ["motifs"]
-    motif_combinations = motif_combinations.merge(
+    res = pd.DataFrame()
+    motif_pairs = motif_pairs.merge(
         seqs[[group_col]], left_index=True, right_index=True
     )
 
-    # Get pairwise combinations present in each sequence
-    motif_combinations["combination"] = motif_combinations.motifs.apply(
-        lambda x: list(itertools.combinations(x, 2))
-    )
-    motif_combinations = motif_combinations[["combination", group_col]].explode(
-        "combination"
-    )
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
+        motif_pairs = _filter_motif_pairs(
+            motif_pairs,
+            seqs,
+            reference_group=reference_group,
+            group_col=group_col,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
+        )
 
-    print("Making count matrix")
-    # Count the number of sequences in which each motif combination is present
-    cts = (
-        motif_combinations[["combination", group_col]]
-        .value_counts()
-        .reset_index(name="count")
-    )
-
-    print("Filtering")
-    # Drop rare combinations
-    if min_group_freq is not None:
-        comb_max = cts.groupby("combination")["count"].max()
-        sel_comb = cts.combination[
-            cts.combination.isin(comb_max[comb_max > min_group_freq].index)
-        ].tolist()
-        print(f"Selected {len(sel_comb)} combinations")
-        motif_combinations = motif_combinations[
-            motif_combinations.combination.isin(sel_comb)
-        ]
-        cts = cts[cts.combination.isin(sel_comb)]
-
-    elif min_group_prop is not None:
-        cts["group_total"] = seqs.Group.value_counts()[cts.Group].tolist()
-        cts["group_prop"] = cts["count"] / cts.group_total
-        # print(cts)
-        sel_comb = set(cts.combination[cts.group_prop > min_group_prop])
-        print(f"Selected {len(sel_comb)} combinations")
-        motif_combinations = motif_combinations[
-            motif_combinations.combination.isin(sel_comb)
-        ]
-        cts = cts[cts.combination.isin(sel_comb)]
-
-    print("Significance testing")
     df = seqs[[group_col]].copy()
-    res = pd.DataFrame()
-
-    for comb in cts.combination.unique():
-        seqs_with_comb = motif_combinations[
-            motif_combinations.combination == comb
-        ].index.tolist()
-        df["has_comb"] = df.index.isin(seqs_with_comb)
+    for pair in motif_pairs.MotifID.unique():
+        seqs_with_pair = motif_pairs[motif_pairs.MotifID == pair].index
+        df["has_pair"] = df.index.isin(seqs_with_pair)
         curr_res = groupwise_fishers(
             df,
             reference_group=reference_group,
-            val_col="has_comb",
+            val_col="has_pair",
             reference_val=None,
             group_col=group_col,
         ).reset_index()
-        curr_res["combination"] = [comb] * len(curr_res)
+        curr_res["MotifID"] = [pair] * len(curr_res)
+        res = pd.concat([res, curr_res])
+
+    # FDR correction
+    res["padj"] = fdrcorrection(res.pval)[1]
+
+    return res.reset_index(drop=True)
+
+
+def motif_pair_differential_orientation(
+    motif_pairs,
+    seqs,
+    reference_group,
+    group_col="Group",
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
+):
+    """
+    Compare the mutual orientation of all motif pairs between groups.
+
+    Args:
+        motif_pairs (pd.DataFrame): Pandas dataframe containing the ouptut of
+            get_motif_pairs.
+        seqs (pd.DataFrame): Pandas dataframe containing sequences
+        reference_group (str): ID of group to use as reference
+        group_col (str): Name of column in `seqs` containing group IDs
+        max_prop_cutoff (int): Limit to combinations with this proportion in
+            at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
+
+    Returns:
+        res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
+            testing results for the mutual orientation of pairwise combinations
+            between groups
+
+    """
+    res = pd.DataFrame()
+    motif_pairs = motif_pairs.merge(
+        seqs[[group_col]], left_index=True, right_index=True
+    )
+
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
+        motif_pairs = _filter_motif_pairs(
+            motif_pairs,
+            seqs,
+            reference_group=reference_group,
+            group_col=group_col,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
+        )
+
+    for pair in motif_pairs.MotifID.unique():
+        curr_res = groupwise_fishers(
+            motif_pairs[motif_pairs.MotifID == pair],
+            reference_group=reference_group,
+            val_col="orientation",
+            reference_val="same",
+            group_col=group_col,
+        ).reset_index()
+        curr_res["MotifID"] = [pair] * len(curr_res)
+        res = pd.concat([res, curr_res])
+
+    # FDR correction
+    res["padj"] = fdrcorrection(res.pval)[1]
+
+    return res.reset_index(drop=True)
+
+
+def motif_pair_differential_distance(
+    motif_pairs,
+    seqs,
+    reference_group,
+    group_col="Group",
+    max_prop_cutoff=0,
+    min_prop_cutoff=0,
+    ref_prop_cutoff=0,
+):
+    """
+    Compare the distance between all motif pairs across groups.
+
+    Args:
+        motif_pairs (pd.DataFrame): Pandas dataframe containing the ouptut of
+            get_motif_pairs.
+        seqs (pd.DataFrame): Pandas dataframe containing sequences
+        reference_group (str): ID of group to use as reference
+        group_col (str): Name of column in `seqs` containing group IDs
+        max_prop_cutoff (int): Limit to combinations with this proportion in
+            at least one group.
+        min_prop_cutoff (float): Limit to combinations with this proportion in
+            in all groups.
+
+    Returns:
+        res (pd.DataFrame): Pandas dataframe containing FDR-corrected significance
+            testing results for the distance between paired motifs, between groups
+    """
+    res = pd.DataFrame()
+    motif_pairs = motif_pairs.merge(
+        seqs[[group_col]], left_index=True, right_index=True
+    )
+
+    if (max_prop_cutoff > 0) or (min_prop_cutoff > 0) or (ref_prop_cutoff > 0):
+        motif_pairs = _filter_motif_pairs(
+            motif_pairs,
+            seqs,
+            reference_group=reference_group,
+            group_col=group_col,
+            max_prop_cutoff=max_prop_cutoff,
+            min_prop_cutoff=min_prop_cutoff,
+            ref_prop_cutoff=ref_prop_cutoff,
+        )
+
+    for pair in motif_pairs.MotifID.unique():
+        curr_res = groupwise_mann_whitney(
+            motif_pairs[motif_pairs.MotifID == pair],
+            reference_group=reference_group,
+            val_col="distance",
+            group_col=group_col,
+        ).reset_index()
+        curr_res["MotifID"] = [pair] * len(curr_res)
         res = pd.concat([res, curr_res])
 
     # FDR correction
