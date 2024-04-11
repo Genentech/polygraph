@@ -201,7 +201,9 @@ def groupwise_mean_edit_dist(seqs, group_col="Group"):
     for g1 in groups:
         for g2 in groups:
             dist = (
-                dist_matrix[seqs[group_col] == g1, seqs[group_col] == g2].mean().mean()
+                dist_matrix[seqs[group_col] == g1, :][:, seqs[group_col] == g2]
+                .mean()
+                .mean()
             )
             group_dist.append((g1, g2, dist))
 
