@@ -8,6 +8,7 @@ from statsmodels.stats.multitest import fdrcorrection
 
 from polygraph.classifier import groupwise_svm
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney, kruskal_dunn
+from hotelling.stats import hotelling_t2
 
 
 def embedding_pca(ad, **kwargs):
@@ -89,7 +90,7 @@ def differential_analysis(ad, reference_group, group_col="Group"):
     return ad
 
 
-def groupwise_1nn(ad, reference_group, group_col="Group", use_pca=False):
+def reference_1nn(ad, reference_group, group_col="Group", use_pca=False):
     """
     For each sequence, find its nearest neighbor among its own group or
     the reference group based on the sequence embeddings.
@@ -175,7 +176,7 @@ def groupwise_1nn(ad, reference_group, group_col="Group", use_pca=False):
     return ad
 
 
-def joint_1nn(ad, reference_group, group_col="Group", use_pca=False):
+def all_1nn(ad, reference_group, group_col="Group", use_pca=False):
     """
     Find the group ID of each sequence's 1-nearest neighbor statistics based on the
     sequence embeddings. Compare all groups to all other groups.
@@ -234,7 +235,7 @@ def joint_1nn(ad, reference_group, group_col="Group", use_pca=False):
     return ad
 
 
-def within_group_knn_dist(ad, n_neighbors=10, group_col="Group", use_pca=False):
+def group_diversity(ad, n_neighbors=10, group_col="Group", use_pca=False):
     """
     Calculates the mean distance of each sequence to its k nearest neighbors in the
     same group, in the embedding space. Metric of diversity
@@ -366,6 +367,53 @@ def dist_to_reference(ad, reference_group, group_col="Group", use_pca=False):
     return ad
 
 
+def distribution_shift(ad, reference_group, group_col="Group", use_pca=False):
+    """
+    Compare the distribution of sequences in each group to the distribution
+    of reference sequences, in the embedding space. Performs Hotelling's T2
+    test to compare multivariate distributions.
+
+    Args:
+        ad (anndata.AnnData): Anndata object containing sequence embeddings
+            of shape (n_seqs x n_vars)
+        reference_group (str): ID of group to use as reference
+        group_col (str): Name of column in .obs containing group ID
+        use_pca (bool): Whether to use PCA distances
+
+    Returns:
+        ad (anndata.AnnData): Modified anndata object containing distance to
+            reference in .uns['distribution_shift'].
+    """
+    rows = []
+    
+    # Get reference sequences
+    in_ref = ad.obs[group_col] == reference_group
+    if use_pca:
+        ref_X = ad.obsm["X_pca"][in_ref, :]
+    else:
+        ref_X = ad.X[in_ref, :]
+
+    # List groups
+    groups = ad.obs[group_col].unique()
+
+    for group in groups:
+        # Get group sequences
+        in_group = ad.obs[group_col] == group
+        if use_pca:
+            group_X = ad.obsm["X_pca"][in_group, :]
+        else:
+            group_X = ad.X[in_group, :]
+
+        # Perform Hotelling's T2 test to compare to the reference
+        rows.append([group] + list(hotelling_t2(group_X, ref_X)[:-1]))
+
+    # Format dataframe
+    res = pd.DataFrame(rows, columns=[group_col, 't2_stat', 'fval', 'pval'])
+    res["padj"] = fdrcorrection(res.pval)[1]
+    ad.uns["dist_shift_test"] = res.set_index(group_col)
+    return ad
+
+
 def embedding_analysis(
     matrix,
     seqs,
@@ -425,13 +473,16 @@ def embedding_analysis(
     ad = differential_analysis(ad, reference_group, group_col)
 
     print("1-NN statistics")
-    ad = groupwise_1nn(ad, reference_group, group_col, use_pca=use_pca)
+    ad = reference_1nn(ad, reference_group, group_col, use_pca=use_pca)
 
     print("Within-group KNN diversity")
-    ad = within_group_knn_dist(ad, n_neighbors, group_col, use_pca=use_pca)
+    ad = group_diversity(ad, n_neighbors, group_col, use_pca=use_pca)
 
     print("Euclidean distance to nearest reference")
     ad = dist_to_reference(ad, reference_group, group_col, use_pca=use_pca)
+
+    print("Distribution shift")
+    ad = distribution_shift(ad, reference_group, group_col, use_pca=use_pca)
 
     print("Train groupwise classifiers")
     ad = groupwise_svm(
