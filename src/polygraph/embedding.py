@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from hotelling.stats import hotelling_t2
 from scipy.stats import fisher_exact
 from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import NearestNeighbors
@@ -8,7 +9,6 @@ from statsmodels.stats.multitest import fdrcorrection
 
 from polygraph.classifier import groupwise_svm
 from polygraph.stats import groupwise_fishers, groupwise_mann_whitney, kruskal_dunn
-from hotelling.stats import hotelling_t2
 
 
 def embedding_pca(ad, **kwargs):
@@ -385,7 +385,7 @@ def distribution_shift(ad, reference_group, group_col="Group", use_pca=False):
             reference in .uns['distribution_shift'].
     """
     rows = []
-    
+
     # Get reference sequences
     in_ref = ad.obs[group_col] == reference_group
     if use_pca:
@@ -408,7 +408,7 @@ def distribution_shift(ad, reference_group, group_col="Group", use_pca=False):
         rows.append([group] + list(hotelling_t2(group_X, ref_X)[:-1]))
 
     # Format dataframe
-    res = pd.DataFrame(rows, columns=[group_col, 't2_stat', 'fval', 'pval'])
+    res = pd.DataFrame(rows, columns=[group_col, "t2_stat", "fval", "pval"])
     res["padj"] = fdrcorrection(res.pval)[1]
     ad.uns["dist_shift_test"] = res.set_index(group_col)
     return ad
