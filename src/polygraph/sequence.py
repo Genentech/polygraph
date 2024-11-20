@@ -261,13 +261,14 @@ def fastsk(seqs, k=5, m=2):
     return np.array(kernel.get_train_kernel())
 
 
-def ISM(seqs):
+def ISM(seqs, drop_ref=False):
     """
     Perform in-silico mutagenesis on given DNA sequence(s)
 
     Args:
         seqs (str, list, pd.DataFrame): A DNA sequence, list of sequences
             or dataframe containing sequences in the column "Sequence".
+        drop_ref (bool): If True, do not return the original sequence.
 
     Returns:
         (list): A list of all possible single-base mutated sequences
@@ -275,22 +276,35 @@ def ISM(seqs):
     """
     # ISM for a single sequence
     if isinstance(seqs, str):
-        return list(
-            np.concatenate(
-                [
-                    [seqs[:pos] + base + seqs[pos + 1 :] for base in STANDARD_BASES]
-                    for pos in range(len(seqs))
-                ]
+        if drop_ref:
+            return list(
+                np.concatenate(
+                    [
+                        [
+                            seqs[:pos] + base + seqs[pos + 1 :]
+                            for base in [x for x in STANDARD_BASES if x != b]
+                        ]
+                        for pos, b in enumerate(seqs)
+                    ]
+                )
             )
-        )
+        else:
+            return list(
+                np.concatenate(
+                    [
+                        [seqs[:pos] + base + seqs[pos + 1 :] for base in STANDARD_BASES]
+                        for pos in range(len(seqs))
+                    ]
+                )
+            )
 
     # Multiple sequences
     elif isinstance(seqs, list):
-        return list(np.concatenate([ISM(seq) for seq in seqs]))
+        return list(np.concatenate([ISM(seq, drop_ref=drop_ref) for seq in seqs]))
 
     # For a dataframe, copy the index
     elif isinstance(seqs, pd.DataFrame):
-        return ISM(seqs.Sequence.tolist())
+        return ISM(seqs.Sequence.tolist(), drop_ref=drop_ref)
 
     else:
         raise TypeError("seqs must be a string, list or dataframe.")
