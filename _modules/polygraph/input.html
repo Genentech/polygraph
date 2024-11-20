@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>polygraph.input &#8212; polygraph unknown documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="../../_static/basic.css?v=686e5160" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css?v=0ca6144b" />
+    <script src="../../_static/documentation_options.js?v=3f1b9271"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for polygraph.input</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">os</span>
+
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+
+<span class="n">script_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="vm">__file__</span><span class="p">))</span>
+<span class="n">resources_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">script_dir</span><span class="p">,</span> <span class="s2">&quot;resources&quot;</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="read_seqs">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.input.read_seqs">[docs]</a>
+<span class="k">def</span> <span class="nf">read_seqs</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot;</span><span class="se">\t</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">incl_ids</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Read sequences and group labels into a dataframe. This creates the input</span>
+<span class="sd">    dataframe for all subsequent analyses.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        file (str): path to a text file containing no header. If incl_ids=True,</span>
+<span class="sd">        the first column should contain IDs and the next two columns should contain</span>
+<span class="sd">        sequence and group label. If incl_ids=False, the first two columns should</span>
+<span class="sd">        contain sequence and group label.</span>
+<span class="sd">        sep (str): Column separator</span>
+<span class="sd">        incl_ids (bool): Whether the first column corresponds to sequence IDs.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        df (pd.DataFrame): Pandas dataframe with columns Sequence, Group</span>
+<span class="sd">            and a unique index.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">incl_ids</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span>
+            <span class="n">file</span><span class="p">,</span>
+            <span class="n">sep</span><span class="o">=</span><span class="n">sep</span><span class="p">,</span>
+            <span class="n">header</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">usecols</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>
+            <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;SeqID&quot;</span><span class="p">,</span> <span class="s2">&quot;Sequence&quot;</span><span class="p">,</span> <span class="s2">&quot;Group&quot;</span><span class="p">],</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;str&quot;</span><span class="p">,</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;SeqID&quot;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">))</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">),</span> <span class="s2">&quot;SeqIDs are not unique.&quot;</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">polygraph.utils</span> <span class="kn">import</span> <span class="n">make_ids</span>
+
+        <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span>
+            <span class="n">file</span><span class="p">,</span>
+            <span class="n">sep</span><span class="o">=</span><span class="n">sep</span><span class="p">,</span>
+            <span class="n">header</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">usecols</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+            <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;Sequence&quot;</span><span class="p">,</span> <span class="s2">&quot;Group&quot;</span><span class="p">],</span>
+            <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;str&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Add unique IDs</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">make_ids</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">df</span></div>
+
+
+
+<div class="viewcode-block" id="read_meme_file">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.input.read_meme_file">[docs]</a>
+<span class="k">def</span> <span class="nf">read_meme_file</span><span class="p">(</span><span class="n">file</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Read a motif database in MEME format</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        file (str): path to MEME file</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        motifs (list): List of pymemesuite.common.Motif objects</span>
+<span class="sd">        bg (pymemesuite.common.Background): Background distribution</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">pymemesuite.common</span> <span class="kn">import</span> <span class="n">MotifFile</span>
+
+    <span class="c1"># Open file</span>
+    <span class="n">motiffile</span> <span class="o">=</span> <span class="n">MotifFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+
+    <span class="c1"># Read motifs until file end</span>
+    <span class="n">motifs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">motif</span> <span class="o">=</span> <span class="n">motiffile</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">motif</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="n">motifs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">motif</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Read </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">motifs</span><span class="p">)</span><span class="si">}</span><span class="s2"> motifs from file.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">motifs</span><span class="p">,</span> <span class="n">motiffile</span><span class="o">.</span><span class="n">background</span></div>
+
+
+
+<div class="viewcode-block" id="download_jaspar">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.input.download_jaspar">[docs]</a>
+<span class="k">def</span> <span class="nf">download_jaspar</span><span class="p">(</span>
+    <span class="n">family</span><span class="o">=</span><span class="s2">&quot;vertebrates&quot;</span><span class="p">,</span> <span class="n">download_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">resources_dir</span><span class="p">,</span> <span class="s2">&quot;jaspar&quot;</span><span class="p">)</span>
+<span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Download and read the JASPAR database of TF motifs</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        family (str): JASPAR family. one of &quot;fungi&quot;, &quot;insects&quot;, &quot;nematodes&quot;,</span>
+<span class="sd">            &quot;plants&quot;, &quot;urochordates&quot;, &quot;vertebrates&quot;</span>
+<span class="sd">        download_dir (str): Path to directory in which to download motifs</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (str): Path to downloaded local file</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create download directory</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">download_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">download_dir</span><span class="p">)</span>
+
+    <span class="c1"># Download</span>
+    <span class="n">jaspar_core_prefix</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_&quot;</span>
+    <span class="p">)</span>
+
+    <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">jaspar_core_prefix</span><span class="si">}{</span><span class="n">family</span><span class="si">}</span><span class="s2">_non-redundant_pfms_meme.txt&quot;</span>
+    <span class="n">local_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">download_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;JASPAR2022_CORE_</span><span class="si">{</span><span class="n">family</span><span class="si">}</span><span class="s2">_non-redundant_pfms_meme.txt&quot;</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">local_path</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File already exists at </span><span class="si">{</span><span class="n">local_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">system</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wget --no-check-certificate -P </span><span class="si">{</span><span class="n">download_dir</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">url</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">local_path</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="download_gtex_tpm">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.input.download_gtex_tpm">[docs]</a>
+<span class="k">def</span> <span class="nf">download_gtex_tpm</span><span class="p">(</span><span class="n">download_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">resources_dir</span><span class="p">,</span> <span class="s2">&quot;gtex&quot;</span><span class="p">)):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Download per-tissue TPM values from GTEX.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        download_dir (str): Path to directory in which to download file</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (str): Path to downloaded local file</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Create download directory</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">download_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">download_dir</span><span class="p">)</span>
+
+    <span class="n">url</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;https://storage.googleapis.com/adult-gtex/bulk-gex/v8/rna-seq/&quot;</span>
+        <span class="o">+</span> <span class="s2">&quot;GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_median_tpm.gct.gz&quot;</span>
+    <span class="p">)</span>
+    <span class="n">local_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">download_dir</span><span class="p">,</span> <span class="s2">&quot;GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_median_tpm.gct.gz&quot;</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">local_path</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;File already exists at </span><span class="si">{</span><span class="n">local_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">system</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wget --no-check-certificate -P </span><span class="si">{</span><span class="n">download_dir</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">url</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">local_path</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="load_gtex_tpm">
+<a class="viewcode-back" href="../../api/polygraph.html#polygraph.input.load_gtex_tpm">[docs]</a>
+<span class="k">def</span> <span class="nf">load_gtex_tpm</span><span class="p">(</span><span class="n">download_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">resources_dir</span><span class="p">,</span> <span class="s2">&quot;gtex&quot;</span><span class="p">)):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Load per-tissue TPM values from GTEX.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        download_dir (str): Path to directory in which to download file</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (pd.DataFrame): TPM matrix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">local_path</span> <span class="o">=</span> <span class="n">download_gtex_tpm</span><span class="p">(</span><span class="n">download_dir</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_table</span><span class="p">(</span><span class="n">local_path</span><span class="p">,</span> <span class="n">skiprows</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span></div>
+
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">polygraph</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../readme.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../license.html">License</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../authors.html">Authors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">Module Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2023, Genentech, inc..
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 8.1.3</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

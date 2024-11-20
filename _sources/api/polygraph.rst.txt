@@ -1,0 +1,101 @@
+polygraph package
+=================
+
+Submodules
+----------
+
+polygraph.classifier module
+---------------------------
+
+.. automodule:: polygraph.classifier
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.embedding module
+--------------------------
+
+.. automodule:: polygraph.embedding
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.evolve module
+-----------------------
+
+.. automodule:: polygraph.evolve
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.input module
+----------------------
+
+.. automodule:: polygraph.input
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.likelihood module
+---------------------------
+
+.. automodule:: polygraph.likelihood
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.models module
+-----------------------
+
+.. automodule:: polygraph.models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.motifs module
+-----------------------
+
+.. automodule:: polygraph.motifs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.sequence module
+-------------------------
+
+.. automodule:: polygraph.sequence
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.stats module
+----------------------
+
+.. automodule:: polygraph.stats
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.utils module
+----------------------
+
+.. automodule:: polygraph.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+polygraph.visualize module
+--------------------------
+
+.. automodule:: polygraph.visualize
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: polygraph
+   :members:
+   :undoc-members:
+   :show-inheritance:
