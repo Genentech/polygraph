@@ -447,7 +447,7 @@ def geometric_sketch(ad, N, groups=None, group_col="Group", use_pca=True):
             group_X = ad.X[in_group, :]
 
         sketch_index = gs(group_X, N=N, replace=False)
-        ad.obs.loc[group_idx[sketch_index], "selected"] = True
+        ad.obs.loc[[group_idx[x] for x in sketch_index], "selected"] = True
 
     return ad
 
