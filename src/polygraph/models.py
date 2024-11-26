@@ -305,10 +305,10 @@ def ism_score(model, seqs, batch_size, device="cpu", task=None):
 
     # Reshape predictions : N, L, 4
     ism_preds = ism_preds.reshape(len(seqs), len(ism) // (len(seqs) * 4), 4)
+    ism_preds = ism_preds.max(-1)
 
     # Compute base-level importance score
-    preds = np.log2(ism_preds / preds)
-    preds = np.abs(preds).max(-1)
+    preds = np.abs(ism_preds - preds)
     return preds
 
 
