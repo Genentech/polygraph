@@ -50,8 +50,12 @@ def scan(seqs, meme_file, group_col="Group", pthresh=1e-3, rc=True):
         for m in match:
             out["MotifID"].append(motif.name.decode())
             out["SeqID"].append(m.source.accession.decode())
-            out["start"].append(m.start)
-            out["end"].append(m.stop)
+            if m.strand=='+':
+                out["start"].append(m.start)
+                out["end"].append(m.stop)
+            else:
+                out["end"].append(m.start)
+                out["start"].append(m.stop)
             out["strand"].append(m.strand)
 
     return pd.DataFrame(out).merge(seqs[[group_col]], left_on="SeqID", right_index=True)

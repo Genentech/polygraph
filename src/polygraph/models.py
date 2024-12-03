@@ -288,7 +288,7 @@ def ism_score(model, seqs, batch_size, device="cpu", task=None):
         if preds.ndim == 2:
             preds = preds.mean(1, keepdims=True)
     else:
-        preds = preds[:, [task]]
+        preds = preds[:, task]
 
     # Mutate sequences
     ism = ISM(seqs)  # N x L x 4
@@ -308,7 +308,7 @@ def ism_score(model, seqs, batch_size, device="cpu", task=None):
     ism_preds = ism_preds.max(-1)
 
     # Compute base-level importance score
-    preds = np.abs(ism_preds - preds)
+    preds = np.abs(ism_preds - np.expand_dims(preds, 1))
     return preds
 
 
