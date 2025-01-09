@@ -50,7 +50,7 @@ def scan(seqs, meme_file, group_col="Group", pthresh=1e-3, rc=True):
         for m in match:
             out["MotifID"].append(motif.name.decode())
             out["SeqID"].append(m.source.accession.decode())
-            if m.strand=='+':
+            if m.strand == "+":
                 out["start"].append(m.start)
                 out["end"].append(m.stop)
             else:
@@ -121,6 +121,10 @@ def nmf(counts, seqs, reference_group, group_col="Group", n_components=10):
     W.columns = factors
     H.index = factors
     H.columns = counts.columns
+
+    # Normalize W and H matrices
+    H = H.div(H.sum(axis=1), axis=0)
+    W = W * H.sum(1)
 
     # Add group IDs to W
     W[group_col] = seqs[group_col].tolist()

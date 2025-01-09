@@ -146,7 +146,9 @@ def pca_plot(
         group_col (str): Column containing group IDs.
         components (list): PCA components to plot
         size (float): Size of points
-        show_ellipse (bool): Outline each group with an ellipse.
+        show_ellipse (bool): Fit each group with a multivariate normal
+            distribution and display an ellipse representing the 95%
+            confidence level.
         reference_group (str): Group to use as reference. This group will
             be plotted first.
     """
@@ -175,7 +177,7 @@ def pca_plot(
         + p9.theme_classic()
     )
     if show_ellipse:
-        g = g + p9.stat_ellipse()
+        g = g + p9.stat_ellipse(type="norm")
     return g
 
 

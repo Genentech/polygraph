@@ -41,7 +41,7 @@ def load_enformer():
     )
 
 
-def enformer_embed(sequences, model):
+def enformer_embed(sequences, model, device="cpu"):
     """
     Embed a batch of sequences using pretrained or fine-tuned enformer
 
@@ -52,6 +52,9 @@ def enformer_embed(sequences, model):
     Returns:
         np.array of shape (n_seqs x 3072)
     """
+    if isinstance(device, int):
+        device = torch.device(device)
+    sequences = str_to_one_hot(sequences).to(device)
     return model(sequences, return_only_embeddings=True).mean(1).cpu().detach().numpy()
 
 
@@ -128,7 +131,7 @@ def _get_embeddings(seqs, model, drop_last_layers=1, device="cpu", swapaxes=Fals
         np.array of shape (n_seqs x n_features)
     """
     if isinstance(model, Enformer):
-        return enformer_embed(seqs, model)
+        return enformer_embed(seqs, model, device=device)
     elif isinstance(model, EsmForMaskedLM):
         return nucleotide_transformer_embed(seqs, model)
     elif isinstance(model, nn.Sequential):
